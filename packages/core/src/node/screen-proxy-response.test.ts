@@ -5,8 +5,8 @@ import {
 } from "./screen-proxy-response.js";
 
 describe("screen proxy response isolation", () => {
-  it.each(["text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", undefined])(
-    "sandboxes every response, including direct navigation with content type %s",
+  it.each(["text/html", "application/xhtml+xml", "image/svg+xml", undefined])(
+    "sandboxes document responses, including direct navigation with content type %s",
     (contentType) => {
       const headers = safeScreenProxyResponseHeaders({ "content-type": contentType });
       expect(headers["content-security-policy"]).toEqual([
@@ -17,6 +17,16 @@ describe("screen proxy response isolation", () => {
       expect(headers["content-type"]).toBe(contentType);
     },
   );
+
+  it("does not apply document sandboxing to JavaScript module assets", () => {
+    expect(safeScreenProxyResponseHeaders({ "content-type": "text/javascript" })).toEqual({
+      "content-type": "text/javascript",
+      "access-control-allow-origin": "null",
+      "access-control-allow-credentials": "true",
+      "cache-control": "no-store",
+      "cdn-cache-control": "no-store",
+    });
+  });
 
   it("retains upstream restrictions as separate policies that cannot loosen the sandbox", () => {
     const policies = [
@@ -55,7 +65,6 @@ describe("screen proxy response isolation", () => {
       "content-type": "text/javascript",
       "content-encoding": "gzip",
       "x-frame-options": "SAMEORIGIN",
-      "content-security-policy": ["sandbox allow-scripts allow-pointer-lock"],
       "access-control-allow-origin": "null",
       "access-control-allow-credentials": "true",
       "cache-control": "no-store",

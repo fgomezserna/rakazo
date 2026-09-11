@@ -3,6 +3,21 @@ import type { IncomingHttpHeaders } from "node:http";
 const SENSITIVE_RESPONSE_HEADERS = new Set(["clear-site-data", "set-cookie", "set-cookie2"]);
 const SCREEN_SANDBOX = "sandbox allow-scripts allow-pointer-lock";
 
+function contentTypeValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? (value[0] ?? undefined) : value;
+}
+
+function isSandboxableDocument(value: string | string[] | undefined) {
+  const rawContentType = contentTypeValue(value);
+  const contentType = rawContentType?.split(";", 1)[0]?.trim().toLowerCase();
+  return (
+    contentType == null ||
+    contentType === "text/html" ||
+    contentType === "application/xhtml+xml" ||
+    contentType === "image/svg+xml"
+  );
+}
+
 /** Screen listeners are untrusted even when their capability URL is opened outside an iframe. */
 export function safeScreenProxyResponseHeaders(headers: IncomingHttpHeaders) {
   const safe: IncomingHttpHeaders = {};
@@ -17,8 +32,17 @@ export function safeScreenProxyResponseHeaders(headers: IncomingHttpHeaders) {
     }
   }
   // Separate CSP policies intersect. An upstream allow-same-origin cannot relax this sandbox,
-  // and existing provider restrictions (including frame-ancestors) remain in force.
-  safe["content-security-policy"] = [...policies, SCREEN_SANDBOX];
+  // and existing provider restrictions (including frame-ancestors) remain in force. Keep the
+  // sandbox on document responses; applying it to ESM assets makes Chromium reject imports from
+  // the opaque capability origin even when their CORS headers are valid.
+  const contentType = safe["content-type"];
+  if (isSandboxableDocument(contentType)) {
+    safe["content-security-policy"] = [...policies, SCREEN_SANDBOX];
+  } else if (policies.length > 0) {
+    safe["content-security-policy"] = policies;
+  } else {
+    delete safe["content-security-policy"];
+  }
   // Module imports from the opaque sandbox origin use credentials mode `include` in Chromium.
   // A wildcard ACAO is invalid for that mode; the only origin that can reach this sandboxed
   // capability document is the literal opaque origin `null`.
