@@ -86,8 +86,17 @@
           // this sandboxed document. Their rejected connection promises often
           // surface as window errors without a filename; those are unrelated to
           // noVNC and must not make the host panel tear down a healthy session.
-          if (!source || (!source.includes("/novnc/") && !source.endsWith("/embed.html"))) return;
-          reportError(event.message || source || "script-error");
+          const detail = String(event.message || source || "script-error");
+          if (
+            detail.includes("chrome-extension://") ||
+            detail.includes("MetaMask") ||
+            detail.includes("TronLink") ||
+            detail.includes("sessionStorage") ||
+            detail.includes("injected script channel")
+          )
+            return;
+          if (source && !source.includes("/novnc/") && !source.endsWith("/embed.html")) return;
+          reportError(detail);
         });
         window.addEventListener("unhandledrejection", (event) => {
           const detail = String(event.reason?.message || event.reason || "module-rejection");
