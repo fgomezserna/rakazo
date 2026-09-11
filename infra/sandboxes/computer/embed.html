@@ -70,12 +70,20 @@
       // a tiny classic-script bridge in front of the module so the host panel
       // can distinguish a load failure from a slow VNC handshake.
       (() => {
-        function reportError(detail) {
+        let moduleStarted = false;
+        function reportStatus(status, detail) {
           if (!window.parent || window.parent === window) return;
           window.parent.postMessage(
-            { source: "rakazo-novnc", status: "error", detail: String(detail || "script-error") },
+            {
+              source: "rakazo-novnc",
+              status,
+              ...(detail ? { detail: String(detail) } : {}),
+            },
             "*",
           );
+        }
+        function reportError(detail) {
+          reportStatus("error", detail || "script-error");
         }
         window.addEventListener("error", (event) => {
           const target = event.target;
@@ -110,7 +118,14 @@
             return;
           reportError(detail);
         });
+        window.__rakazoNovncMarkModuleStarted = () => {
+          moduleStarted = true;
+          reportStatus("module-started");
+        };
         window.__rakazoNovncReportError = reportError;
+        window.setTimeout(() => {
+          if (!moduleStarted) reportError("noVNC module did not start");
+        }, 7_000);
       })();
     </script>
     <script type="module">
@@ -120,6 +135,8 @@
       import keysyms from "./core/input/keysymdef.js";
       import RFB from "./core/rfb.js";
       import { attachMobileKeyboard, attachMobileTrackpad, isTouchBrowser } from "./mobile-keyboard.js";
+
+      window.__rakazoNovncMarkModuleStarted?.();
 
       function query(name, fallback) {
         const match = `${document.location.href}${window.location.hash}`.match(
@@ -149,7 +166,13 @@
         );
       }
 
-      const rfb = new RFB(document.getElementById("screen"), url);
+      let rfb;
+      try {
+        rfb = new RFB(document.getElementById("screen"), url);
+      } catch (error) {
+        window.__rakazoNovncReportError?.(error?.stack || error);
+        throw error;
+      }
       rfb.addEventListener("connect", () => reportConnection("connected"));
       rfb.addEventListener("disconnect", (event) =>
         reportConnection("disconnected", event.detail?.clean ? "clean" : "connection-lost"),
