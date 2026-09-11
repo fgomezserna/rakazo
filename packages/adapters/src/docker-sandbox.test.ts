@@ -160,6 +160,41 @@ describe("Docker sandbox", () => {
     );
   });
 
+  it("marks a missing supervisor computer as sandbox-gone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: "computer not found" }, { status: 400 })),
+    );
+    const provider = new DockerSandboxProvider("http://supervisor.test", "test-token");
+
+    await expect(
+      provider.connectScreen(
+        { id: "old-container", botId: "bot", kind: "docker", providerRef: "old-container" },
+        { view: "stream" },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      name: "SandboxNotFoundError",
+      message: expect.stringContaining("computer not found"),
+    });
+  });
+
+  it("does not hide a transient supervisor screen failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: "upstream unavailable" }, { status: 503 })),
+    );
+    const provider = new DockerSandboxProvider("http://supervisor.test", "test-token");
+
+    await expect(
+      provider.connectScreen(
+        { id: "computer", botId: "bot", kind: "docker", providerRef: "computer" },
+        { view: "stream" },
+        context,
+      ),
+    ).rejects.toThrow("sandbox screen mode failed: 503");
+  });
+
   it("still releases the screen after the run abort signal has fired", async () => {
     const fetchMock = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>

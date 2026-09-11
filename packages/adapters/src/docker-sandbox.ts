@@ -32,6 +32,22 @@ export const SCREEN_RELEASE_TIMEOUT_MS = 8_000;
 const SANDBOX_ERROR_RESPONSE_TIMEOUT_MS = 1_000;
 const SANDBOX_SUCCESS_RESPONSE_TIMEOUT_MS = 30_000;
 
+/**
+ * The supervisor currently normalizes a missing Docker container to either a
+ * 404 or a 400 response (the screen-mode route wraps its handler error). Keep
+ * that provider-specific signal so the API can clear the stale providerRef and
+ * provision a fresh computer instead of rendering an empty screen forever.
+ */
+const MISSING_COMPUTER_RESPONSE =
+  /(?:computer|container|sandbox)(?:[^\n]{0,80})(?:not found|does not exist|no such container)/i;
+
+function sandboxGoneError(status: number, detail: string): Error {
+  const error = new Error(`sandbox computer is gone (${status})${detail ? `: ${detail}` : ""}`);
+  // Reuse the provider-agnostic marker understood by the API's recovery path.
+  error.name = "SandboxNotFoundError";
+  return error;
+}
+
 async function safeBody(res: Response, signal?: AbortSignal): Promise<string> {
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > MAX_SANDBOX_ERROR_RESPONSE_BYTES) {
@@ -228,7 +244,10 @@ export class DockerSandboxProvider implements SandboxProvider {
       if (/cannot allocate another screen/i.test(detail)) {
         throw new Error("This Team Computer cannot allocate another screen.");
       }
-      return { url: null, mimeType: "text/html", close: async () => undefined };
+      if (MISSING_COMPUTER_RESPONSE.test(detail)) {
+        throw sandboxGoneError(res.status, detail);
+      }
+      throw new Error(`sandbox screen mode failed: ${res.status} ${detail}`.trim());
     }
     const body = await readSandboxJson<{ screenUrl?: string }>(res, context.signal);
     return {
