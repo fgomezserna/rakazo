@@ -82,12 +82,23 @@
           const source = String(
             event.filename || (target && "src" in target ? target.src : "") || "",
           );
-          if (source && !source.includes("/novnc/") && !source.endsWith("/embed.html")) return;
+          // Browser extensions (wallets in particular) also inject listeners into
+          // this sandboxed document. Their rejected connection promises often
+          // surface as window errors without a filename; those are unrelated to
+          // noVNC and must not make the host panel tear down a healthy session.
+          if (!source || (!source.includes("/novnc/") && !source.endsWith("/embed.html"))) return;
           reportError(event.message || source || "script-error");
         });
         window.addEventListener("unhandledrejection", (event) => {
           const detail = String(event.reason?.message || event.reason || "module-rejection");
-          if (detail.includes("cloudflareinsights.com") || detail.includes("cdn-cgi/rum")) return;
+          if (
+            detail.includes("cloudflareinsights.com") ||
+            detail.includes("cdn-cgi/rum") ||
+            detail.includes("chrome-extension://") ||
+            detail.includes("MetaMask") ||
+            detail.includes("TronLink")
+          )
+            return;
           reportError(detail);
         });
         window.__rakazoNovncReportError = reportError;
