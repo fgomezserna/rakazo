@@ -12,7 +12,8 @@ describe("screen proxy response isolation", () => {
       expect(headers["content-security-policy"]).toEqual([
         "sandbox allow-scripts allow-pointer-lock",
       ]);
-      expect(headers["access-control-allow-origin"]).toBe("*");
+      expect(headers["access-control-allow-origin"]).toBe("null");
+      expect(headers["access-control-allow-credentials"]).toBe("true");
       expect(headers["content-type"]).toBe(contentType);
     },
   );
@@ -24,7 +25,8 @@ describe("screen proxy response isolation", () => {
     ];
     expect(safeScreenProxyResponseHeaders({ "Content-Security-Policy": policies })).toEqual({
       "content-security-policy": [...policies, "sandbox allow-scripts allow-pointer-lock"],
-      "access-control-allow-origin": "*",
+      "access-control-allow-origin": "null",
+      "access-control-allow-credentials": "true",
       "cache-control": "no-store",
       "cdn-cache-control": "no-store",
     });
@@ -54,7 +56,8 @@ describe("screen proxy response isolation", () => {
       "content-encoding": "gzip",
       "x-frame-options": "SAMEORIGIN",
       "content-security-policy": ["sandbox allow-scripts allow-pointer-lock"],
-      "access-control-allow-origin": "*",
+      "access-control-allow-origin": "null",
+      "access-control-allow-credentials": "true",
       "cache-control": "no-store",
       "cdn-cache-control": "no-store",
     });

@@ -19,8 +19,11 @@ export function safeScreenProxyResponseHeaders(headers: IncomingHttpHeaders) {
   // Separate CSP policies intersect. An upstream allow-same-origin cannot relax this sandbox,
   // and existing provider restrictions (including frame-ancestors) remain in force.
   safe["content-security-policy"] = [...policies, SCREEN_SANDBOX];
-  // Module imports from the opaque sandbox origin still need access to noVNC assets.
-  safe["access-control-allow-origin"] = "*";
+  // Module imports from the opaque sandbox origin use credentials mode `include` in Chromium.
+  // A wildcard ACAO is invalid for that mode; the only origin that can reach this sandboxed
+  // capability document is the literal opaque origin `null`.
+  safe["access-control-allow-origin"] = "null";
+  safe["access-control-allow-credentials"] = "true";
   // Screen capability paths contain short-lived, user-scoped state. Do not let a CDN or
   // browser reuse an asset response from another capability before its CORS policy is checked.
   safe["cache-control"] = "no-store";
