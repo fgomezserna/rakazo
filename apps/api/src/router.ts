@@ -315,15 +315,195 @@ async function lockProviderConnectionScope(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('connection-provider'), hashtext(${scope}))`;
 }
 
-function computerContext(actor: Actor, botId: string, operationId: string): AdapterContext {
+function computerContext(
+  actor: Actor,
+  botId: string,
+  operationId: string,
+  signal = new AbortController().signal,
+): AdapterContext {
   return {
     operationId,
     traceId: operationId,
     spaceId: actor.spaceId,
     userId: actor.userId,
     botId,
-    signal: new AbortController().signal,
+    signal,
   };
+}
+
+type BotWithComputer = Prisma.BotGetPayload<{ include: { computer: true } }>;
+
+type StoppedComputerForMove = {
+  wasRunning: boolean;
+};
+
+async function claimBotComputerSwitch(
+  deps: RouterDeps,
+  actor: Actor,
+  botId: string,
+): Promise<BotWithComputer> {
+  return deps.prisma.$transaction(async (tx) => {
+    const bot = await tx.bot.findFirst({
+      where: { id: botId, userId: actor.userId, archivedAt: null },
+      include: { computer: true },
+    });
+    if (!bot) throw new IsolationError();
+    if (bot.computer) {
+      await tx.$queryRaw`SELECT id FROM computers WHERE id = ${bot.computer.id} FOR UPDATE`;
+      if (bot.computer.maintenanceId) {
+        throw new ORPCError("CONFLICT", { message: "Computer is busy" });
+      }
+    }
+    const claimed = await tx.bot.updateMany({
+      where: {
+        id: bot.id,
+        userId: actor.userId,
+        archivedAt: null,
+        computerSwitching: false,
+        ...(bot.computer ? { computer: { maintenanceId: null } } : {}),
+      },
+      data: { computerSwitching: true },
+    });
+    if (claimed.count !== 1) {
+      throw new ORPCError("CONFLICT", { message: "Computer is busy" });
+    }
+    return tx.bot.findUniqueOrThrow({ where: { id: bot.id }, include: { computer: true } });
+  });
+}
+
+async function releaseBotComputerSwitch(prisma: PrismaClient, botId: string): Promise<void> {
+  await prisma.bot.updateMany({ where: { id: botId }, data: { computerSwitching: false } });
+}
+
+/** Stop a bot computer after checkpointing it, clearing both control and legacy execution leases. */
+async function stopBotComputer(
+  deps: RouterDeps,
+  actor: Actor,
+  bot: BotWithComputer,
+  signal?: AbortSignal,
+  operationId = "computer.stop",
+): Promise<StoppedComputerForMove> {
+  const computer = bot.computer;
+  if (!computer) return { wasRunning: false };
+  const wasRunning = computer.state === "running" || computer.state === "booting";
+  const controlLeaseId = computer.controlLeaseId;
+  const previousState = computer.state;
+  const now = new Date();
+  const claimed = await deps.prisma.computer.updateMany({
+    where: {
+      id: computer.id,
+      state: { not: "suspending" },
+      maintenanceId: null,
+      executionLeases: {
+        none: { botId: { not: bot.id }, expiresAt: { gt: now } },
+      },
+    },
+    data: { state: "suspending" },
+  });
+  if (claimed.count !== 1) {
+    throw new ORPCError("CONFLICT", {
+      message: "Other Team bots are still using this computer",
+    });
+  }
+  const otherRun = await deps.prisma.run.findFirst({
+    where: {
+      botId: { not: bot.id },
+      status: { in: [...ACTIVE_RUN_STATUSES] },
+      bot: { computerId: computer.id },
+    },
+    select: { id: true },
+  });
+  if (otherRun) {
+    await deps.prisma.computer.updateMany({
+      where: { id: computer.id, state: "suspending" },
+      data: { state: previousState },
+    });
+    throw new ORPCError("CONFLICT", {
+      message: "Other Team bots are still using this computer",
+    });
+  }
+  await deps.prisma.computerExecutionLease.deleteMany({
+    where: { computerId: computer.id, botId: bot.id },
+  });
+  try {
+    if (computer.providerRef) {
+      const ctx = computerContext(actor, bot.id, operationId, signal);
+      const ref = toComputerRef(computer);
+      await checkpointAndRecordComputerWorkspace(deps, computer, ref, ctx);
+      await deps.sandbox.stop(ref, ctx);
+    }
+    await deps.prisma.computer.update({
+      where: { id: computer.id },
+      data: {
+        state: "stopped",
+        controlHolder: "none",
+        controlLeaseId: null,
+        controlLeaseExpiresAt: null,
+        controlBotId: null,
+        controlRunId: null,
+        executionRunId: null,
+        executionBotId: null,
+        executionLeaseExpiresAt: null,
+      },
+    });
+  } catch (error) {
+    await deps.prisma.computer
+      .updateMany({
+        where: { id: computer.id, state: "suspending" },
+        data: { state: "error" },
+      })
+      .catch(() => undefined);
+    throw error;
+  }
+  await deps.jobs
+    .cancel(computerControlExpireJobKey(computer.id, controlLeaseId ?? undefined))
+    .catch((error) => {
+      // The computer is already stopped; a stale expiry job is harmless after the lease is clear.
+      getLogger().error("computer control expiry cancellation", error);
+    });
+  return { wasRunning };
+}
+
+async function startBotComputer(
+  deps: RouterDeps,
+  actor: Actor,
+  botId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const bot = await deps.prisma.bot.findFirst({
+    where: { id: botId, spaceId: actor.spaceId, userId: actor.userId, archivedAt: null },
+    include: { computer: true },
+  });
+  if (!bot?.computer) throw new IsolationError();
+  if (bot.computer.state === "running" && bot.computer.providerRef) return;
+  const manualRunId = `move:boot:${randomUUID()}`;
+  let lease: ComputerExecutionLease | null;
+  try {
+    lease = await acquireComputerExecutionLease(deps.prisma, {
+      computerId: bot.computer.id,
+      runId: manualRunId,
+      botId: bot.id,
+    });
+  } catch (error) {
+    if (error instanceof ComputerBusyError) {
+      throw new ORPCError("CONFLICT", { message: "Computer is busy" });
+    }
+    throw error;
+  }
+  try {
+    await provisionComputer(deps, bot.computer.id, {
+      ...computerContext(actor, bot.id, manualRunId, signal),
+      screenLeaseId: screenLeaseIdForRun(lease, manualRunId),
+    });
+    scheduleComputerSleep(deps.jobs, bot.computer.id);
+  } catch (error) {
+    if (error instanceof ComputerBusyError) {
+      throw new ORPCError("CONFLICT", { message: "Computer is busy" });
+    }
+    throw error;
+  } finally {
+    await releaseComputerExecutionLease(deps.prisma, lease);
+  }
 }
 
 function mcpServerDto(
@@ -956,13 +1136,86 @@ export function createRouter(deps: RouterDeps) {
         return { ok: true as const };
       }),
       moveToSpace: authed.bots.moveToSpace.handler(async ({ context, input }) => {
+        let claimedBot: BotWithComputer | null = null;
+        let stoppedComputer: StoppedComputerForMove | null = null;
+        let restartComputerAfterMove = false;
+        let moved = false;
         try {
-          return await repos.moveBotToSpace(context.actor, input.botId, input.spaceId);
+          claimedBot = await claimBotComputerSwitch(deps, context.actor, input.botId);
+          const sourceActor = { ...context.actor, spaceId: claimedBot.spaceId };
+          const activeRun = await deps.prisma.run.findFirst({
+            where: { botId: claimedBot.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
+            select: { id: true },
+          });
+          if (activeRun) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "Stop the bot's active work before moving it",
+            });
+          }
+
+          const computer = claimedBot.computer;
+          restartComputerAfterMove = Boolean(
+            computer && (computer.state === "running" || computer.state === "booting"),
+          );
+          const needsStop = Boolean(
+            computer &&
+              (computer.controlHolder !== "none" ||
+                computer.executionRunId !== null ||
+                computer.executionBotId !== null),
+          );
+          if (needsStop) {
+            stoppedComputer = await stopBotComputer(
+              deps,
+              sourceActor,
+              claimedBot,
+              context.signal,
+              "computer.move.stop",
+            );
+          }
+
+          const movedBot = await repos.moveBotToSpace(context.actor, input.botId, input.spaceId);
+          moved = true;
+          if (restartComputerAfterMove) {
+            try {
+              await startBotComputer(
+                deps,
+                { ...context.actor, spaceId: input.spaceId },
+                movedBot.id,
+                context.signal,
+              );
+            } catch (error) {
+              getLogger().error("bot move computer restart", error, { botId: movedBot.id });
+              throw new ORPCError("CONFLICT", {
+                message: "Bot moved, but its computer could not be restarted. Open it to retry.",
+              });
+            }
+          }
+          return movedBot;
         } catch (error) {
+          if (!moved && stoppedComputer?.wasRunning && claimedBot) {
+            try {
+              await startBotComputer(
+                deps,
+                { ...context.actor, spaceId: claimedBot.spaceId },
+                claimedBot.id,
+                context.signal,
+              );
+            } catch (restoreError) {
+              getLogger().error("bot move computer restore", restoreError, {
+                botId: claimedBot.id,
+              });
+            }
+          }
           if (error instanceof BotMoveBlockedError) {
             throw new ORPCError("BAD_REQUEST", { message: error.message });
           }
           throw mapSpaceLifecycleError(error);
+        } finally {
+          if (claimedBot) {
+            await releaseBotComputerSwitch(deps.prisma, claimedBot.id).catch((error) => {
+              getLogger().error("bot move switch release", error, { botId: claimedBot?.id });
+            });
+          }
         }
       }),
       update: authed.bots.update.handler(async ({ context, input }) => {
@@ -1637,74 +1890,7 @@ export function createRouter(deps: RouterDeps) {
       stop: authed.computer.stop.handler(async ({ context, input }) => {
         const bot = await repos.getBot(context.actor, input.botId);
         if (!bot.computer) throw new IsolationError();
-        const controlLeaseId = bot.computer.controlLeaseId;
-        const now = new Date();
-        const claimed = await deps.prisma.computer.updateMany({
-          where: {
-            id: bot.computer.id,
-            state: { not: "suspending" },
-            maintenanceId: null,
-            executionLeases: {
-              none: { botId: { not: bot.id }, expiresAt: { gt: now } },
-            },
-          },
-          data: { state: "suspending" },
-        });
-        if (claimed.count !== 1) {
-          throw new ORPCError("CONFLICT", {
-            message: "Other Team bots are still using this computer",
-          });
-        }
-        const otherRun = await deps.prisma.run.findFirst({
-          where: {
-            botId: { not: bot.id },
-            status: { in: [...ACTIVE_RUN_STATUSES] },
-            bot: { computerId: bot.computer.id },
-          },
-          select: { id: true },
-        });
-        if (otherRun) {
-          await deps.prisma.computer.updateMany({
-            where: { id: bot.computer.id, state: "suspending" },
-            data: { state: bot.computer.state },
-          });
-          throw new ORPCError("CONFLICT", {
-            message: "Other Team bots are still using this computer",
-          });
-        }
-        await deps.prisma.computerExecutionLease.deleteMany({
-          where: { computerId: bot.computer.id, botId: bot.id },
-        });
-        try {
-          if (bot.computer.providerRef) {
-            const ctx = computerContext(context.actor, bot.id, "stop");
-            const ref = toComputerRef(bot.computer);
-            await checkpointAndRecordComputerWorkspace(deps, bot.computer, ref, ctx);
-            await deps.sandbox.stop(ref, ctx);
-          }
-          await deps.prisma.computer.update({
-            where: { id: bot.computer.id },
-            data: {
-              state: "stopped",
-              controlHolder: "none",
-              controlLeaseId: null,
-              controlLeaseExpiresAt: null,
-              controlBotId: null,
-              controlRunId: null,
-            },
-          });
-        } catch (error) {
-          await deps.prisma.computer
-            .updateMany({
-              where: { id: bot.computer.id, state: "suspending" },
-              data: { state: "error" },
-            })
-            .catch(() => undefined);
-          throw error;
-        }
-        await deps.jobs.cancel(
-          computerControlExpireJobKey(bot.computer.id, controlLeaseId ?? undefined),
-        );
+        await stopBotComputer(deps, context.actor, bot, context.signal);
         return computerStatus(deps, context.actor, input.botId);
       }),
       recover: authed.computer.recover.handler(async ({ context, input }) => {

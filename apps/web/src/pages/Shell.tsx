@@ -2651,6 +2651,15 @@ export function ShellPage() {
             name="sidebar-search"
           />
         </InputGroup>
+        {movingBotId ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mx-2.5 mb-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground"
+          >
+            {t`Moving bot… its computer will be stopped and restarted automatically.`}
+          </div>
+        ) : null}
         {botMoveError ? (
           <div
             role="status"
