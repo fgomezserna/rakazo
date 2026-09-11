@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
-import type { Bot, BotSection } from "@rakazo/contracts";
+import type { Bot, BotSection, Space } from "@rakazo/contracts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +12,7 @@ import {
 } from "@rakazo/ui-web";
 import {
   Archive,
+  ArrowRightLeft,
   Bell,
   BellDot,
   Check,
@@ -35,6 +36,8 @@ export function BotContextMenu({
   onTogglePinned,
   sections,
   onMoveToSection,
+  workspaces,
+  onMoveToSpace,
   onCreateSection,
   onToggleUnread,
   onEdit,
@@ -49,6 +52,8 @@ export function BotContextMenu({
   onTogglePinned: () => void;
   sections: BotSection[];
   onMoveToSection: (sectionId: string | null) => void;
+  workspaces?: Array<Pick<Space, "id" | "name">>;
+  onMoveToSpace?: (spaceId: string) => void;
   onCreateSection: () => void;
   onToggleUnread: () => void;
   onEdit: () => void;
@@ -113,6 +118,22 @@ export function BotContextMenu({
             </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {workspaces && workspaces.length > 0 && onMoveToSpace ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <ArrowRightLeft />
+              {t`Move to workspace`}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-[min(420px,calc(100vh-16px))] min-w-[180px] overflow-y-auto">
+              {workspaces.map((workspace) => (
+                <DropdownMenuItem key={workspace.id} onClick={() => onMoveToSpace(workspace.id)}>
+                  <Folder />
+                  <span dir="auto">{workspace.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
         <DropdownMenuItem onClick={onToggleUnread}>
           {bot.unread ? <BellDot /> : <Bell />}
           {bot.unread ? t`Mark as Read` : t`Mark as Unread`}

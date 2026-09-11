@@ -6,8 +6,8 @@ import {
   type MessageBlock,
   type SpaceBot,
 } from "@rakazo/contracts";
-import { userVisibleMessages } from "@rakazo/core";
-import type { PrismaClient } from "./client.js";
+import { ACTIVE_RUN_STATUSES, userVisibleMessages } from "@rakazo/core";
+import type { Prisma, PrismaClient } from "./client.js";
 import { type ComputerMode, ensureComputerRecord, parseComputerMode } from "./computers.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import { IsolationError } from "./scope.js";
@@ -16,6 +16,13 @@ import { activeRunSelection, previewFromBlocks } from "./thread-listing.js";
 
 /** Newest messages loaded for sidebar preview; enough to skip a short peer-run tail. */
 const SIDEBAR_PREVIEW_MESSAGE_WINDOW = 16;
+
+export class BotMoveBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BotMoveBlockedError";
+  }
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
@@ -527,6 +534,216 @@ export function createRepos(prisma: PrismaClient) {
           botIds.map((id, position) => tx.bot.update({ where: { id }, data: { position } })),
         );
       });
+    },
+
+    async moveBotToSpace(actor: Actor, botId: string, targetSpaceId: string): Promise<Bot> {
+      const moved = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Resolve the source from the user's own bots first: the sidebar shows
+        // bots from every member workspace, while the RPC header only carries
+        // the currently selected workspace.
+        const candidate = await tx.bot.findFirst({
+          where: { id: botId, userId: actor.userId, archivedAt: null },
+          select: { spaceId: true },
+        });
+        if (!candidate) throw new IsolationError();
+
+        // Lock every boundary in a stable order so a move cannot race a space
+        // deletion/content creation or deadlock with another move in reverse.
+        const lockedSpaceIds = [
+          ...new Set([actor.spaceId, candidate.spaceId, targetSpaceId]),
+        ].sort();
+        const memberships = new Map<string, { organizationId: string }>();
+        for (const spaceId of lockedSpaceIds) {
+          memberships.set(
+            spaceId,
+            await lockSpaceForContentCreation(tx, {
+              spaceId,
+              userId: actor.userId,
+            }),
+          );
+        }
+        const sourceMembership = memberships.get(actor.spaceId);
+        const targetMembership = memberships.get(targetSpaceId);
+        const botSpaceMembership = memberships.get(candidate.spaceId);
+        if (
+          !sourceMembership ||
+          !targetMembership ||
+          !botSpaceMembership ||
+          sourceMembership.organizationId !== targetMembership.organizationId ||
+          sourceMembership.organizationId !== botSpaceMembership.organizationId
+        ) {
+          throw new IsolationError();
+        }
+
+        if (candidate.spaceId === targetSpaceId) {
+          throw new BotMoveBlockedError("The bot is already in this workspace");
+        }
+
+        const bot = await tx.bot.findFirst({
+          where: {
+            id: botId,
+            spaceId: candidate.spaceId,
+            userId: actor.userId,
+            archivedAt: null,
+          },
+          include: { thread: true, computer: true },
+        });
+        if (!bot) throw new IsolationError();
+
+        if (bot.parentBotId) {
+          throw new BotMoveBlockedError("Move the parent bot together with its child bot");
+        }
+
+        if (bot.spawnKey) {
+          const spawnKeyConflict = await tx.bot.findFirst({
+            where: {
+              spaceId: targetSpaceId,
+              spawnKey: bot.spawnKey,
+              id: { not: bot.id },
+            },
+            select: { id: true },
+          });
+          if (spawnKeyConflict) {
+            throw new BotMoveBlockedError("The destination already has a bot with that spawn key");
+          }
+        }
+
+        if (
+          bot.computer &&
+          (bot.computer.controlHolder !== "none" ||
+            bot.computer.executionRunId !== null ||
+            bot.computer.executionBotId !== null)
+        ) {
+          throw new BotMoveBlockedError("Stop the bot computer before moving it");
+        }
+
+        const [
+          childCount,
+          groupMemberCount,
+          mcpAssignmentCount,
+          externalConversationCount,
+          agentConnectionCount,
+          activeRunCount,
+          recordingSkillCount,
+          cloudAgentCount,
+          computerUpdateCount,
+        ] = await Promise.all([
+          tx.bot.count({ where: { parentBotId: bot.id } }),
+          tx.chatGroupMember.count({ where: { botId: bot.id } }),
+          tx.botMcpServer.count({ where: { botId: bot.id } }),
+          tx.externalConversation.count({ where: { botId: bot.id } }),
+          tx.agentConnection.count({
+            where: { OR: [{ requesterBotId: bot.id }, { targetBotId: bot.id }] },
+          }),
+          tx.run.count({ where: { botId: bot.id, status: { in: [...ACTIVE_RUN_STATUSES] } } }),
+          tx.taughtSkill.count({ where: { botId: bot.id, status: "recording" } }),
+          tx.cloudAgent.count({ where: { botId: bot.id, status: "running" } }),
+          tx.computerUpdate.count({
+            where: { botId: bot.id, status: { in: ["queued", "running"] } },
+          }),
+        ]);
+
+        if (childCount > 0) {
+          throw new BotMoveBlockedError("Move child bots first");
+        }
+        if (groupMemberCount > 0) {
+          throw new BotMoveBlockedError("Remove the bot from groups before moving it");
+        }
+        if (mcpAssignmentCount > 0) {
+          throw new BotMoveBlockedError("Remove MCP server assignments before moving the bot");
+        }
+        if (externalConversationCount > 0) {
+          throw new BotMoveBlockedError("Disconnect external conversations before moving the bot");
+        }
+        if (agentConnectionCount > 0) {
+          throw new BotMoveBlockedError("Disconnect bot-to-bot connections before moving the bot");
+        }
+        if (activeRunCount > 0 || recordingSkillCount > 0 || computerUpdateCount > 0) {
+          throw new BotMoveBlockedError("Stop the bot's active work before moving it");
+        }
+        if (cloudAgentCount > 0) {
+          throw new BotMoveBlockedError(
+            "Wait for cloud agent operations to finish before moving it",
+          );
+        }
+
+        const positions = await tx.bot.aggregate({
+          where: {
+            spaceId: targetSpaceId,
+            userId: actor.userId,
+            archivedAt: null,
+          },
+          _max: { position: true },
+        });
+
+        let computerId = bot.computerId;
+        if (bot.computer?.scope === "team") {
+          const targetComputer = await ensureComputerRecord(tx, {
+            mode: "team",
+            spaceId: targetSpaceId,
+            userId: actor.userId,
+            kind: bot.computer.kind,
+          });
+          computerId = targetComputer.id;
+        } else if (bot.computer) {
+          await tx.computer.update({
+            where: { id: bot.computer.id },
+            data: { spaceId: targetSpaceId },
+          });
+        }
+
+        const sourceWhere = { botId: bot.id, spaceId: candidate.spaceId };
+        const targetSpace = { spaceId: targetSpaceId };
+        await Promise.all([
+          tx.thread.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.event.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.task.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.run.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.routine.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.scratchpadItem.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.taughtSkill.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.memoryDocument.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.agentHome.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.browserProfile.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.artifact.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.usageRecord.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.cloudAgent.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.messagingIdentity.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.messagingLinkCode.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.botSecret.updateMany({ where: sourceWhere, data: targetSpace }),
+          tx.externalEffect.updateMany({
+            where: {
+              run: { botId: bot.id },
+              spaceId: candidate.spaceId,
+            },
+            data: targetSpace,
+          }),
+          bot.webhookSecretId
+            ? tx.secret.updateMany({
+                where: {
+                  id: bot.webhookSecretId,
+                  userId: actor.userId,
+                  spaceId: candidate.spaceId,
+                  kind: "webhook",
+                },
+                data: targetSpace,
+              })
+            : Promise.resolve(),
+        ]);
+
+        return tx.bot.update({
+          where: { id: bot.id },
+          data: {
+            spaceId: targetSpaceId,
+            sectionId: null,
+            position: (positions._max.position ?? -1) + 1,
+            computerId,
+          },
+          include: { thread: true, computer: true },
+        });
+      });
+
+      return mapBot(moved);
     },
 
     async setBotComputer(actor: Actor, botId: string, mode: ComputerMode): Promise<Bot> {

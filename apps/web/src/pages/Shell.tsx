@@ -443,6 +443,10 @@ export function ShellPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const mobileSidebarSwipeRef = useRef<{ startX: number; startY: number } | null>(null);
   const [draggedBotId, setDraggedBotId] = useState<string | null>(null);
+  const [draggedBotSpaceId, setDraggedBotSpaceId] = useState<string | null>(null);
+  const [draggedOverSpaceId, setDraggedOverSpaceId] = useState<string | null>(null);
+  const [movingBotId, setMovingBotId] = useState<string | null>(null);
+  const [botMoveError, setBotMoveError] = useState<string | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [botsSidebarCollapsed, setBotsSidebarCollapsed] = useState(false);
   const focusPromptAbortRef = useRef<AbortController | null>(null);
@@ -1434,6 +1438,31 @@ export function ShellPage() {
       void flushBotOrder();
     },
     [flushBotOrder],
+  );
+  const moveBotToSpace = useCallback(
+    async (sourceBotId: string, targetSpaceId: string) => {
+      if (movingBotId) return;
+      setBotMoveError(null);
+      setDraggedBotId(null);
+      setDraggedBotSpaceId(null);
+      setDraggedOverSpaceId(null);
+      setMovingBotId(sourceBotId);
+      try {
+        await rpc.bots.moveToSpace({ botId: sourceBotId, spaceId: targetSpaceId });
+        if (activeBotId.current === sourceBotId) {
+          if (!selectSpace(targetSpaceId))
+            throw new Error(t`Could not select the destination workspace`);
+          window.location.assign(`/app/${sourceBotId}`);
+          return;
+        }
+        await refreshBots(false, true);
+      } catch (error) {
+        setBotMoveError(error instanceof Error ? error.message : t`Could not move the bot`);
+      } finally {
+        setMovingBotId(null);
+      }
+    },
+    [movingBotId, refreshBots, t],
   );
   const toggleSidebarSection = useCallback(
     (key: string) => {
@@ -2622,6 +2651,15 @@ export function ShellPage() {
             name="sidebar-search"
           />
         </InputGroup>
+        {botMoveError ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mx-2.5 mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] text-destructive"
+          >
+            {botMoveError}
+          </div>
+        ) : null}
         <div className="rk-scroll flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 pb-2.5">
           {showSpaceSearch ? (
             <SpaceSearchResults
@@ -2651,7 +2689,11 @@ export function ShellPage() {
                       <div className="flex items-center pt-2">
                         <button
                           type="button"
-                          className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-muted-foreground/80 hover:bg-sidebar-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                          className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-muted-foreground/80 hover:bg-sidebar-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring ${
+                            draggedOverSpaceId === group.spaceId
+                              ? "bg-sidebar-accent ring-1 ring-ring/50"
+                              : ""
+                          }`}
                           onClick={() => {
                             if (group.emptySpaceId) {
                               openSpaceChat(group.emptySpaceId, "/onboarding");
@@ -2659,6 +2701,44 @@ export function ShellPage() {
                             }
                             toggleSidebarSection(group.key);
                           }}
+                          onDragOver={(event) => {
+                            if (
+                              !draggedBotId ||
+                              !draggedBotSpaceId ||
+                              draggedBotSpaceId === group.spaceId ||
+                              movingBotId
+                            )
+                              return;
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                            setDraggedOverSpaceId(group.spaceId);
+                          }}
+                          onDragLeave={(event) => {
+                            const relatedTarget = event.relatedTarget;
+                            if (
+                              relatedTarget instanceof Node &&
+                              event.currentTarget.contains(relatedTarget)
+                            )
+                              return;
+                            if (draggedOverSpaceId === group.spaceId) setDraggedOverSpaceId(null);
+                          }}
+                          onDrop={(event) => {
+                            const sourceBotId =
+                              draggedBotId ?? event.dataTransfer.getData("text/plain");
+                            if (
+                              !sourceBotId ||
+                              !draggedBotSpaceId ||
+                              draggedBotSpaceId === group.spaceId
+                            )
+                              return;
+                            event.preventDefault();
+                            void moveBotToSpace(sourceBotId, group.spaceId);
+                          }}
+                          title={
+                            draggedBotSpaceId && draggedBotSpaceId !== group.spaceId
+                              ? t`Drop to move a bot to ${group.spaceName}`
+                              : undefined
+                          }
                           onContextMenu={
                             group.canDeleteSpace
                               ? (event) => {
@@ -2679,6 +2759,7 @@ export function ShellPage() {
                                 ? t`Expand ${group.title}`
                                 : t`Collapse ${group.title}`
                           }
+                          aria-busy={movingBotId !== null}
                         >
                           <span className="flex min-w-0 items-center gap-1.5 truncate">
                             {group.showLock ? (
@@ -2731,10 +2812,24 @@ export function ShellPage() {
                           onDragStart={(event) => {
                             if (item.kind !== "bot") return;
                             setDraggedBotId(item.chat.id);
+                            setDraggedBotSpaceId(item.chat.spaceId);
+                            setDraggedOverSpaceId(null);
+                            setBotMoveError(null);
                             event.dataTransfer.effectAllowed = "move";
                             event.dataTransfer.setData("text/plain", item.chat.id);
                           }}
                           onDragOver={(event) => {
+                            if (
+                              item.kind === "bot" &&
+                              draggedBotId &&
+                              draggedBotSpaceId &&
+                              draggedBotSpaceId !== item.chat.spaceId
+                            ) {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = "move";
+                              setDraggedOverSpaceId(item.chat.spaceId);
+                              return;
+                            }
                             if (
                               item.kind === "bot" &&
                               draggedBotId &&
@@ -2747,10 +2842,20 @@ export function ShellPage() {
                           onDrop={(event) => {
                             if (item.kind !== "bot" || !draggedBotId) return;
                             event.preventDefault();
+                            if (draggedBotSpaceId && draggedBotSpaceId !== item.chat.spaceId) {
+                              void moveBotToSpace(draggedBotId, item.chat.spaceId);
+                              return;
+                            }
                             reorderRosterBot(draggedBotId, item.chat.id, groupBotIds);
                             setDraggedBotId(null);
+                            setDraggedBotSpaceId(null);
+                            setDraggedOverSpaceId(null);
                           }}
-                          onDragEnd={() => setDraggedBotId(null)}
+                          onDragEnd={() => {
+                            setDraggedBotId(null);
+                            setDraggedBotSpaceId(null);
+                            setDraggedOverSpaceId(null);
+                          }}
                           onKeyDown={(event) => {
                             if (
                               item.kind !== "bot" ||
@@ -2792,8 +2897,12 @@ export function ShellPage() {
                           }`}
                           style={{
                             opacity:
-                              item.kind === "bot" && draggedBotId === item.chat.id ? 0.55 : 1,
+                              item.kind === "bot" &&
+                              (draggedBotId === item.chat.id || movingBotId === item.chat.id)
+                                ? 0.55
+                                : 1,
                           }}
+                          aria-busy={item.kind === "bot" && movingBotId === item.chat.id}
                         >
                           {item.kind === "bot" ? (
                             <BotAvatar
@@ -3643,6 +3752,21 @@ export function ShellPage() {
             position={botMenu.position}
             onClose={closeBotMenu}
             sections={botSections}
+            workspaces={
+              contextBot
+                ? spaces
+                    .filter((space) => space.id !== contextBot.spaceId)
+                    .map((space) => ({ id: space.id, name: space.name }))
+                : undefined
+            }
+            onMoveToSpace={
+              contextBot
+                ? (spaceId) => {
+                    setBotMenu(null);
+                    void moveBotToSpace(contextBot.id, spaceId);
+                  }
+                : undefined
+            }
             onTogglePinned={() => {
               setBotMenu(null);
               const request = contextBot

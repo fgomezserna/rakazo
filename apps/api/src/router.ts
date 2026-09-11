@@ -96,6 +96,7 @@ import {
 } from "@rakazo/core";
 import {
   appendEventInTransaction,
+  BotMoveBlockedError,
   CannotDeleteDefaultSpaceError,
   CannotDeleteLastSpaceError,
   CannotDeleteSpaceAsNonOwnerError,
@@ -953,6 +954,16 @@ export function createRouter(deps: RouterDeps) {
       reorder: authed.bots.reorder.handler(async ({ context, input }) => {
         await repos.reorderBots(context.actor, input.botIds);
         return { ok: true as const };
+      }),
+      moveToSpace: authed.bots.moveToSpace.handler(async ({ context, input }) => {
+        try {
+          return await repos.moveBotToSpace(context.actor, input.botId, input.spaceId);
+        } catch (error) {
+          if (error instanceof BotMoveBlockedError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw mapSpaceLifecycleError(error);
+        }
       }),
       update: authed.bots.update.handler(async ({ context, input }) => {
         const existing = await repos.getBot(context.actor, input.botId);

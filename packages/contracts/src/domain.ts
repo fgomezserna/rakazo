@@ -346,6 +346,12 @@ export const UpdateBotInput = z
     }
   });
 
+export const MoveBotToSpaceInput = z.object({
+  botId: Id,
+  spaceId: Id,
+});
+export type MoveBotToSpaceInput = z.infer<typeof MoveBotToSpaceInput>;
+
 export const RoutineSchema = z.object({
   id: Id,
   botId: Id,

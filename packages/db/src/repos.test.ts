@@ -1,7 +1,7 @@
 import type { Actor } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
-import { createRepos } from "./repos.js";
+import { BotMoveBlockedError, createRepos } from "./repos.js";
 import { IsolationError } from "./scope.js";
 
 const actor: Actor = {
@@ -379,5 +379,88 @@ describe("createRepos.reorderBots", () => {
       IsolationError,
     );
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("createRepos.moveBotToSpace", () => {
+  function moveRepos(activeRunCount = 0) {
+    const movedBot = { ...baseBot, spaceId: "ws-3" };
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const botFindFirst = vi
+      .fn()
+      .mockResolvedValueOnce({ spaceId: "ws-2" })
+      .mockResolvedValueOnce({ ...baseBot, spaceId: "ws-2" });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      spaceMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          organizationId: "org-1",
+          space: { deletingAt: null },
+        }),
+      },
+      bot: {
+        findFirst: botFindFirst,
+        count: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockResolvedValue({ _max: { position: 3 } }),
+        update: vi.fn().mockResolvedValue(movedBot),
+      },
+      chatGroupMember: { count: vi.fn().mockResolvedValue(0) },
+      botMcpServer: { count: vi.fn().mockResolvedValue(0) },
+      externalConversation: { count: vi.fn().mockResolvedValue(0) },
+      agentConnection: { count: vi.fn().mockResolvedValue(0) },
+      run: { count: vi.fn().mockResolvedValue(activeRunCount), updateMany },
+      taughtSkill: { count: vi.fn().mockResolvedValue(0), updateMany },
+      cloudAgent: { count: vi.fn().mockResolvedValue(0), updateMany },
+      computerUpdate: { count: vi.fn().mockResolvedValue(0) },
+      thread: { updateMany },
+      event: { updateMany },
+      task: { updateMany },
+      routine: { updateMany },
+      scratchpadItem: { updateMany },
+      memoryDocument: { updateMany },
+      agentHome: { updateMany },
+      browserProfile: { updateMany },
+      artifact: { updateMany },
+      usageRecord: { updateMany },
+      messagingIdentity: { updateMany },
+      messagingLinkCode: { updateMany },
+      botSecret: { updateMany },
+      externalEffect: { updateMany },
+      secret: { updateMany },
+    };
+    const prisma = {
+      $transaction: vi.fn((run: (client: typeof tx) => Promise<unknown>) => run(tx)),
+    };
+    return { repos: createRepos(prisma as unknown as PrismaClient), tx };
+  }
+
+  it("moves a bot from another member workspace and carries its scoped history", async () => {
+    const { repos, tx } = moveRepos();
+    const moved = await repos.moveBotToSpace({ ...actor, spaceId: "ws-1" }, "bot-1", "ws-3");
+
+    expect(moved.spaceId).toBe("ws-3");
+    expect(tx.thread.updateMany).toHaveBeenCalledWith({
+      where: { botId: "bot-1", spaceId: "ws-2" },
+      data: { spaceId: "ws-3" },
+    });
+    expect(tx.bot.update).toHaveBeenCalledWith({
+      where: { id: "bot-1" },
+      data: {
+        spaceId: "ws-3",
+        sectionId: null,
+        position: 4,
+        computerId: undefined,
+      },
+      include: { thread: true, computer: true },
+    });
+  });
+
+  it("refuses to move a bot while it has an active run", async () => {
+    const { repos, tx } = moveRepos(1);
+
+    await expect(repos.moveBotToSpace(actor, "bot-1", "ws-3")).rejects.toBeInstanceOf(
+      BotMoveBlockedError,
+    );
+    expect(tx.bot.update).not.toHaveBeenCalled();
   });
 });
