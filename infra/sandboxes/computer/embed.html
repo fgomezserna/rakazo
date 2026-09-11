@@ -88,7 +88,27 @@
       const prefix = window.location.pathname.replace(/[^/]+$/, "");
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       const url = `${protocol}://${window.location.host}${prefix}${path}`;
+      function reportConnection(status, detail) {
+        if (!window.parent || window.parent === window) return;
+        window.parent.postMessage(
+          {
+            source: "rakazo-novnc",
+            status,
+            ...(detail ? { detail } : {}),
+          },
+          "*",
+        );
+      }
+
       const rfb = new RFB(document.getElementById("screen"), url);
+      rfb.addEventListener("connect", () => reportConnection("connected"));
+      rfb.addEventListener("disconnect", (event) =>
+        reportConnection("disconnected", event.detail?.clean ? "clean" : "connection-lost"),
+      );
+      rfb.addEventListener("securityfailure", (event) =>
+        reportConnection("disconnected", event.detail?.reason ?? "security-failure"),
+      );
+      reportConnection("connecting");
       rfb.viewOnly = flag("view_only");
       rfb.scaleViewport = true;
       rfb.clipViewport = false;

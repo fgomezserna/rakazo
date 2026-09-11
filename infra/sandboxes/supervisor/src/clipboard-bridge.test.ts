@@ -206,6 +206,8 @@ describe("host clipboard paste bridge", () => {
     expect(dockerfile).toMatch(/clipboard-bridge\.js/);
     expect(embed).toMatch(/attachHostClipboardPaste/);
     expect(embed).toMatch(/clipboard-bridge\.js/);
+    expect(embed).toMatch(/rakazo-novnc/);
+    expect(embed).toMatch(/addEventListener\("connect"/);
     expect(start).toMatch(/clipboard-bridge\.js/);
     expect(supervisor).toMatch(/"clipboard-bridge\.js"/);
   });

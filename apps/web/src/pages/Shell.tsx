@@ -108,6 +108,7 @@ import {
 } from "lucide-react";
 import {
   type ClipboardEvent,
+  type CSSProperties,
   type DragEvent,
   lazy,
   type MutableRefObject,
@@ -626,6 +627,7 @@ export function ShellPage() {
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
   const screenRequest = useRef(0);
+  const screenReconnectAttempt = useRef(0);
   const contextBot =
     botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
   const contextGroup =
@@ -923,6 +925,25 @@ export function ShellPage() {
     });
   }
 
+  function handleScreenConnectionState(status: "connected" | "disconnected") {
+    if (status === "connected") {
+      screenReconnectAttempt.current = 0;
+      return;
+    }
+    const id = activeBotId.current;
+    if (!id || !computerVisible.current) return;
+    if (screenReconnectAttempt.current === 0) {
+      screenReconnectAttempt.current = 1;
+      void refreshComputerScreen(id).catch(() => undefined);
+      return;
+    }
+    // An iframe can load successfully while its WebSocket is already dead. Do
+    // not leave a black canvas with no explanation: surface the same retry path
+    // as an HTTP screen failure after one automatic refresh.
+    setComputerError(t`Could not connect to the computer screen`);
+    setComputerErrorFromScreen(false);
+  }
+
   async function loadOlderMessages() {
     const targetBotId = inGroup ? undefined : active?.id;
     const targetGroupId = inGroup ? groupId : undefined;
@@ -1141,6 +1162,7 @@ export function ShellPage() {
       pinnedAroundRef.current = null;
     }
     screenRequest.current += 1;
+    screenReconnectAttempt.current = 0;
     setComputerError(null);
     setComputerErrorFromScreen(false);
     const cached = computerCacheRef.current.get(active.id);
@@ -2512,7 +2534,10 @@ export function ShellPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => active && void refreshComputerScreen(active.id)}
+          onClick={() => {
+            screenReconnectAttempt.current = 0;
+            if (active) void refreshComputerScreen(active.id);
+          }}
         >
           <Trans>Retry screen</Trans>
         </Button>
@@ -3523,13 +3548,15 @@ export function ShellPage() {
                   ) : computer?.kind === "desktop" ? (
                     <DesktopKindEmptyState className="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground/80" />
                   ) : computer?.state === "running" && embeddedScreenUrl && !computerScreenError ? (
-                    <iframe
+                    <ComputerScreenFrame
                       title={t`Bot screen preview`}
-                      src={embeddedScreenUrl}
+                      url={embeddedScreenUrl}
                       sandbox={screenIframeSandbox(embeddedScreenUrl)}
                       className="h-full w-full border-0 bg-black"
                       allow="clipboard-read; clipboard-write"
                       style={{ pointerEvents: "none" }}
+                      monitorConnection={Boolean(screenIframeSandbox(embeddedScreenUrl))}
+                      onConnectionState={handleScreenConnectionState}
                     />
                   ) : (
                     <div className="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground/80">
@@ -4389,15 +4416,17 @@ export function ShellPage() {
                 <DesktopKindEmptyState className="grid h-full place-items-center px-8 text-center text-sm text-muted-foreground/80" />
               ) : computer?.state === "running" && embeddedScreenUrl && !computerScreenError ? (
                 <>
-                  <iframe
+                  <ComputerScreenFrame
                     title={t`Bot screen`}
-                    src={embeddedScreenUrl}
+                    url={embeddedScreenUrl}
                     sandbox={screenIframeSandbox(embeddedScreenUrl)}
                     className="h-full w-full border-0 bg-black"
                     allow="clipboard-read; clipboard-write; fullscreen"
                     style={{
                       pointerEvents: recordingSkill || !hasControl ? "none" : "auto",
                     }}
+                    monitorConnection={Boolean(screenIframeSandbox(embeddedScreenUrl))}
+                    onConnectionState={handleScreenConnectionState}
                   />
                   {active ? (
                     <TeachCaptureOverlay
@@ -4426,6 +4455,74 @@ export function ShellPage() {
 
   return (
     <AvatarStyleProvider value={bootstrapMe?.avatarStyle ?? "robot"}>{shell}</AvatarStyleProvider>
+  );
+}
+
+type ScreenConnectionState = "connected" | "disconnected";
+
+function ComputerScreenFrame({
+  url,
+  title,
+  sandbox,
+  className,
+  allow,
+  style,
+  monitorConnection = false,
+  onConnectionState,
+}: {
+  url: string;
+  title: string;
+  sandbox?: string;
+  className?: string;
+  allow?: string;
+  style?: CSSProperties;
+  monitorConnection?: boolean;
+  onConnectionState?: (status: ScreenConnectionState) => void;
+}) {
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const onConnectionStateRef = useRef(onConnectionState);
+  onConnectionStateRef.current = onConnectionState;
+
+  useEffect(() => {
+    if (!monitorConnection) return;
+    let connected = false;
+    const timeout = window.setTimeout(() => {
+      if (!connected) onConnectionStateRef.current?.("disconnected");
+    }, 10_000);
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow) return;
+      const data = event.data;
+      if (!data || typeof data !== "object" || data.source !== "rakazo-novnc") return;
+      if (data.status === "connected") {
+        connected = true;
+        window.clearTimeout(timeout);
+        onConnectionStateRef.current?.("connected");
+      } else if (data.status === "disconnected") {
+        connected = false;
+        window.clearTimeout(timeout);
+        onConnectionStateRef.current?.("disconnected");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+    };
+  }, [monitorConnection, url]);
+
+  return (
+    <iframe
+      ref={frameRef}
+      title={title}
+      src={url}
+      sandbox={sandbox}
+      className={className}
+      allow={allow}
+      style={style}
+      onError={() => {
+        if (monitorConnection) onConnectionStateRef.current?.("disconnected");
+      }}
+    />
   );
 }
 

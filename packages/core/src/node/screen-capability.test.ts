@@ -49,6 +49,8 @@ describe("sealed screen capabilities", () => {
           constructor(_element: unknown, value: string) {
             socketUrl = value;
           }
+
+          addEventListener() {}
         },
         attachHostClipboardPaste: () => {},
         // Embed imports are stripped for this smoke; stub the touch-keyboard
