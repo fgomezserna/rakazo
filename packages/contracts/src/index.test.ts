@@ -16,8 +16,11 @@ import {
   ReorderBotsInput,
   RunActivityRowSchema,
   RunSchema,
+  SPACE_AVATAR_MAX_BYTES,
+  SpaceAvatarSchema,
   UpdateBotInput,
   UpdateGroupInput,
+  UpdateSpaceInput,
 } from "./index.js";
 
 describe("contracts", () => {
@@ -163,6 +166,7 @@ describe("contracts", () => {
     expect(appContract.bots.restore).toBeTruthy();
     expect(appContract.bots.remove).toBeTruthy();
     expect(appContract.spaces.remove).toBeTruthy();
+    expect(appContract.spaces.update).toBeTruthy();
     expect(appContract.botSections.list).toBeTruthy();
     expect(appContract.botSections.create).toBeTruthy();
     expect(appContract.threads.subscribe).toBeTruthy();
@@ -177,6 +181,25 @@ describe("contracts", () => {
     expect(ProductEventType.options).toContain("thread.cleared");
     expect(ProductEventType.options).toContain("thread.subagent");
     expect(ProductEventType.options).toContain("bot.spawned");
+  });
+
+  it("validates workspace profile updates and compact avatar data URLs", () => {
+    const avatar = `data:image/png;base64,${"A".repeat(32)}`;
+    expect(SpaceAvatarSchema.safeParse(avatar).success).toBe(true);
+    expect(UpdateSpaceInput.parse({ spaceId: "space-1", name: "  Support  " })).toEqual({
+      spaceId: "space-1",
+      name: "Support",
+    });
+    expect(UpdateSpaceInput.parse({ spaceId: "space-1", avatarUrl: avatar }).avatarUrl).toBe(
+      avatar,
+    );
+    expect(UpdateSpaceInput.safeParse({ spaceId: "space-1" }).success).toBe(false);
+    expect(SpaceAvatarSchema.safeParse("data:image/svg+xml;base64,PHN2Zy8+").success).toBe(false);
+    expect(
+      SpaceAvatarSchema.safeParse(
+        `data:image/png;base64,${"A".repeat(Math.ceil(SPACE_AVATAR_MAX_BYTES / 3) * 4 + 1)}`,
+      ).success,
+    ).toBe(false);
   });
 
   it("requires a distinct, non-empty bot order", () => {

@@ -13,10 +13,11 @@ import {
 export type InboxSpace = Pick<
   MobileSpace,
   "id" | "name" | "isDefault" | "hasContent" | "canDelete" | "botSections"
-> & {
-  bots: (MobileBot | SpaceBot)[];
-  groups: (MobileGroup | SpaceGroup)[];
-};
+> &
+  Partial<Pick<MobileSpace, "avatarUrl" | "canConfigure">> & {
+    bots: (MobileBot | SpaceBot)[];
+    groups: (MobileGroup | SpaceGroup)[];
+  };
 
 export type InboxSpaceItem =
   | { type: "bot"; bot: MobileBot | SpaceBot }
@@ -36,7 +37,7 @@ export function spaceInboxItems(spaces: InboxSpace[]): InboxSpaceItem[] {
       ...space.groups.map((chat) => ({ type: "group" as const, group: chat, ...chat })),
     ];
     const items: InboxSpaceItem[] = [];
-    if (spaces.length > 1 || !space.isDefault || chats.length === 0) {
+    if (spaces.length > 1 || !space.isDefault || chats.length === 0 || space.canConfigure) {
       items.push({ type: "heading", key: space.id, title: space.name, space });
     }
     for (const group of groupBotsForSidebar(chats, space.botSections)) {

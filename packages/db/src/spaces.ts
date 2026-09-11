@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isSpaceAvatarDataUrl, SPACE_NAME_MAX_LENGTH } from "@rakazo/contracts";
 import { Prisma, type PrismaClient } from "./client.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
@@ -15,8 +16,15 @@ export class SpaceLimitError extends Error {
 
 export class InvalidSpaceNameError extends Error {
   constructor() {
-    super("Space name must be between 1 and 60 characters");
+    super(`Space name must be between 1 and ${SPACE_NAME_MAX_LENGTH} characters`);
     this.name = "InvalidSpaceNameError";
+  }
+}
+
+export class InvalidSpaceAvatarError extends Error {
+  constructor() {
+    super("Space avatar must be a supported image smaller than 512 KiB");
+    this.name = "InvalidSpaceAvatarError";
   }
 }
 
@@ -52,6 +60,13 @@ export class CannotDeleteSpaceAsNonOwnerError extends Error {
   constructor() {
     super("Only the space owner can delete it");
     this.name = "CannotDeleteSpaceAsNonOwnerError";
+  }
+}
+
+export class CannotConfigureSpaceAsNonOwnerError extends Error {
+  constructor() {
+    super("Only the space owner can configure it");
+    this.name = "CannotConfigureSpaceAsNonOwnerError";
   }
 }
 
@@ -180,7 +195,7 @@ export async function createSpaceForMember(
   },
 ): Promise<{ id: string; name: string }> {
   const name = input.name.trim();
-  if (!name || name.length > 60) throw new InvalidSpaceNameError();
+  if (!name || name.length > SPACE_NAME_MAX_LENGTH) throw new InvalidSpaceNameError();
   const spaceId = randomUUID();
   const spaceMembershipId = randomUUID();
   const createdAt = new Date();
@@ -230,6 +245,46 @@ export async function createSpaceForMember(
   );
 
   return { id: spaceId, name };
+}
+
+/** Update the profile of a space owned by the current member. */
+export async function updateSpaceProfileForMember(
+  prisma: PrismaClient,
+  input: {
+    spaceId: string;
+    userId: string;
+    name?: string;
+    avatarUrl?: string | null;
+  },
+): Promise<{ id: string; name: string; avatarUrl: string | null }> {
+  const name = input.name?.trim();
+  if (input.name !== undefined && (!name || name.length > SPACE_NAME_MAX_LENGTH)) {
+    throw new InvalidSpaceNameError();
+  }
+  if (
+    input.avatarUrl !== undefined &&
+    input.avatarUrl !== null &&
+    !isSpaceAvatarDataUrl(input.avatarUrl)
+  ) {
+    throw new InvalidSpaceAvatarError();
+  }
+  const membership = await prisma.spaceMember.findUnique({
+    where: { spaceId_userId: { spaceId: input.spaceId, userId: input.userId } },
+    select: { role: true, space: { select: { deletingAt: true } } },
+  });
+  if (!membership) throw new SpaceNotFoundError();
+  if (membership.role !== "owner") throw new CannotConfigureSpaceAsNonOwnerError();
+  if (membership.space.deletingAt) throw new SpaceDeletionInProgressError();
+
+  const updated = await prisma.space.update({
+    where: { id: input.spaceId },
+    data: {
+      ...(name !== undefined ? { name } : {}),
+      ...(input.avatarUrl !== undefined ? { avatarUrl: input.avatarUrl } : {}),
+    },
+    select: { id: true, name: true, avatarUrl: true },
+  });
+  return updated;
 }
 
 type EmptySpaceDeleteInput = {

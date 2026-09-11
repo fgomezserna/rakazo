@@ -268,14 +268,45 @@ export const ExternalConversationSchema = z.object({
 });
 export type ExternalConversation = z.infer<typeof ExternalConversationSchema>;
 
+export const SPACE_NAME_MAX_LENGTH = 60;
+export const SPACE_AVATAR_MAX_BYTES = 512 * 1024;
+export const SPACE_AVATAR_MAX_BASE64_LENGTH = Math.ceil(SPACE_AVATAR_MAX_BYTES / 3) * 4;
+export const SPACE_AVATAR_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+] as const;
+
+export type SpaceAvatarMimeType = (typeof SPACE_AVATAR_MIME_TYPES)[number];
+
+const SPACE_AVATAR_DATA_URL_PATTERN =
+  /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/;
+
+export function isSpaceAvatarDataUrl(value: string): boolean {
+  const match = SPACE_AVATAR_DATA_URL_PATTERN.exec(value);
+  if (!match) return false;
+  const base64 = match[2] ?? "";
+  return base64.length <= SPACE_AVATAR_MAX_BASE64_LENGTH;
+}
+
+export const SpaceAvatarSchema = z
+  .string()
+  .max(SPACE_AVATAR_MAX_BASE64_LENGTH + 32)
+  .refine(isSpaceAvatarDataUrl, "Avatar must be a supported image smaller than 512 KiB");
+export type SpaceAvatar = z.infer<typeof SpaceAvatarSchema>;
+
 export const SpaceSchema = z.object({
   id: Id,
   name: z.string(),
   isDefault: z.boolean(),
+  avatarUrl: SpaceAvatarSchema.nullable().default(null),
   /** True when the space has any bot or group, including archived. */
   hasContent: z.boolean(),
   /** True only when the current member may delete this non-default space. */
   canDelete: z.boolean().optional(),
+  /** True when the current member may edit this space's profile. */
+  canConfigure: z.boolean().default(false),
   bots: z.array(SpaceBotSchema),
   groups: z.array(SpaceGroupSchema),
   externalConversations: z.array(ExternalConversationSchema),
@@ -287,6 +318,8 @@ export const SpaceNavigationSchema = z.object({
   current: z.object({
     id: Id,
     name: z.string(),
+    avatarUrl: SpaceAvatarSchema.nullable().default(null),
+    canConfigure: z.boolean().default(false),
     bots: z.array(BotSchema),
     groups: z.array(GroupSchema),
     externalConversations: z.array(ExternalConversationSchema),
@@ -295,6 +328,24 @@ export const SpaceNavigationSchema = z.object({
   spaces: z.array(SpaceSchema),
 });
 export type SpaceNavigation = z.infer<typeof SpaceNavigationSchema>;
+
+export const UpdateSpaceInput = z
+  .object({
+    spaceId: Id,
+    name: z.string().trim().min(1).max(SPACE_NAME_MAX_LENGTH).optional(),
+    avatarUrl: SpaceAvatarSchema.nullable().optional(),
+  })
+  .refine((input) => input.name !== undefined || input.avatarUrl !== undefined, {
+    message: "Provide a name or avatar update",
+  });
+export type UpdateSpaceInput = z.infer<typeof UpdateSpaceInput>;
+
+export const SpaceProfileSchema = z.object({
+  id: Id,
+  name: z.string(),
+  avatarUrl: SpaceAvatarSchema.nullable(),
+});
+export type SpaceProfile = z.infer<typeof SpaceProfileSchema>;
 
 export const BOT_NAME_MAX_LENGTH = 80;
 export const BOT_TITLE_MAX_LENGTH = 500;

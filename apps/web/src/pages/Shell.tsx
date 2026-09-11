@@ -215,6 +215,7 @@ import {
   NewBotSectionDialog,
   NewSpaceDialog,
   PickerInfoDialog,
+  SpaceSettingsDialog,
 } from "./shell/dialogs";
 import {
   AppConnectCard,
@@ -491,6 +492,7 @@ export function ShellPage() {
   const [deleteTarget, setDeleteTarget] = useState<Bot | null>(null);
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<Group | null>(null);
   const [deleteSpaceTarget, setDeleteSpaceTarget] = useState<Space | null>(null);
+  const [spaceSettingsTarget, setSpaceSettingsTarget] = useState<Space | null>(null);
   const [spaceMenu, setSpaceMenu] = useState<{
     id: string;
     position: ContextMenuPosition;
@@ -1328,13 +1330,16 @@ export function ShellPage() {
                 isDefault: true,
                 hasContent: true,
                 canDelete: false,
+                canConfigure: true,
+                avatarUrl: null,
                 bots,
                 groups,
                 botSections,
               },
             ]
           : [];
-    const showSpaceNames = sidebarSpaces.length > 1;
+    const showSpaceNames =
+      sidebarSpaces.length > 1 || sidebarSpaces.some((space) => space.canConfigure === true);
     return sidebarSpaces.flatMap((space) => {
       const visibleBots = space.bots.filter((bot) =>
         `${bot.name} ${bot.title ?? ""} ${bot.preview ?? ""}`.toLowerCase().includes(needle),
@@ -1360,6 +1365,8 @@ export function ShellPage() {
         emptySpaceId: undefined as string | undefined,
         spaceId: space.id,
         spaceName: space.name,
+        spaceAvatarUrl: space.avatarUrl,
+        canConfigureSpace: space.canConfigure === true,
         canDeleteSpace: index === 0 && space.canDelete === true,
       }));
       if (sections.length > 0) return sections;
@@ -1375,6 +1382,8 @@ export function ShellPage() {
           emptySpaceId: space.id,
           spaceId: space.id,
           spaceName: space.name,
+          spaceAvatarUrl: space.avatarUrl,
+          canConfigureSpace: space.canConfigure === true,
           canDeleteSpace: space.canDelete === true,
         },
       ];
@@ -2798,7 +2807,7 @@ export function ShellPage() {
                               : undefined
                           }
                           onContextMenu={
-                            group.canDeleteSpace
+                            group.canConfigureSpace || group.canDeleteSpace
                               ? (event) => {
                                   event.preventDefault();
                                   spaceMenuAnchor.current = event.currentTarget;
@@ -2821,7 +2830,17 @@ export function ShellPage() {
                         >
                           <span className="flex min-w-0 items-center gap-1.5 truncate">
                             {group.showLock ? (
-                              <Lock size={11} strokeWidth={2} aria-hidden="true" />
+                              <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-muted text-muted-foreground">
+                                {group.spaceAvatarUrl ? (
+                                  <img
+                                    src={group.spaceAvatarUrl}
+                                    alt=""
+                                    className="size-full object-cover"
+                                  />
+                                ) : (
+                                  <Lock size={10} strokeWidth={2} aria-hidden="true" />
+                                )}
+                              </span>
                             ) : null}
                             <span className="truncate">{group.title}</span>
                           </span>
@@ -2838,7 +2857,7 @@ export function ShellPage() {
                             />
                           )}
                         </button>
-                        {group.canDeleteSpace ? (
+                        {group.canConfigureSpace || group.canDeleteSpace ? (
                           <Button
                             variant="ghost"
                             size="icon-sm"
@@ -3969,17 +3988,37 @@ export function ShellPage() {
               sideOffset={0}
               className="w-[220px]"
             >
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => {
-                  const target = spaces.find((space) => space.id === spaceMenu.id);
-                  if (target) setDeleteSpaceTarget(target);
-                  setSpaceMenu(null);
-                }}
-              >
-                <Trash2 />
-                {t`Delete space`}
-              </DropdownMenuItem>
+              {(() => {
+                const target = spaces.find((space) => space.id === spaceMenu.id);
+                if (!target) return null;
+                return (
+                  <>
+                    {target.canConfigure ? (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setSpaceSettingsTarget(target);
+                          setSpaceMenu(null);
+                        }}
+                      >
+                        <Settings />
+                        {t`Configure workspace`}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {target.canDelete ? (
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => {
+                          setDeleteSpaceTarget(target);
+                          setSpaceMenu(null);
+                        }}
+                      >
+                        <Trash2 />
+                        {t`Delete space`}
+                      </DropdownMenuItem>
+                    ) : null}
+                  </>
+                );
+              })()}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -4033,6 +4072,29 @@ export function ShellPage() {
                 }
               }
               await refreshBots(true);
+            }}
+          />
+        ) : null}
+
+        {spaceSettingsTarget ? (
+          <SpaceSettingsDialog
+            space={spaceSettingsTarget}
+            onCancel={() => setSpaceSettingsTarget(null)}
+            onConfirm={async ({ name, avatarUrl }) => {
+              const updated = await rpc.spaces.update({
+                spaceId: spaceSettingsTarget.id,
+                name,
+                avatarUrl,
+              });
+              setSpaces((current) =>
+                current.map((space) =>
+                  space.id === updated.id
+                    ? { ...space, name: updated.name, avatarUrl: updated.avatarUrl }
+                    : space,
+                ),
+              );
+              setSpaceSettingsTarget(null);
+              await refreshBots();
             }}
           />
         ) : null}

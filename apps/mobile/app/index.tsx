@@ -13,6 +13,7 @@ import {
   Alert,
   AppState,
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -293,6 +294,9 @@ export default function Home() {
                 bots: visible,
                 groups: visibleGroups,
                 botSections,
+                avatarUrl: null,
+                canConfigure: true,
+                canDelete: false,
               },
             ]
           : [];
@@ -373,14 +377,24 @@ export default function Home() {
 
   function showSpaceActions(space: InboxSpace) {
     if (
-      !canDeleteInboxSpace(space) ||
+      (!space.canConfigure && !canDeleteInboxSpace(space)) ||
       spaceActionRef.current.busy ||
       spaceActionRef.current.recoveryId
     )
       return;
-    Alert.alert(space.name, undefined, [
-      { text: t("Cancel"), style: "cancel" },
-      {
+    const actions: Array<{
+      text: string;
+      style?: "cancel" | "destructive" | "default";
+      onPress?: () => void;
+    }> = [{ text: t("Cancel"), style: "cancel" }];
+    if (space.canConfigure) {
+      actions.push({
+        text: t("Configure workspace"),
+        onPress: () => router.push({ pathname: "/space-settings", params: { spaceId: space.id } }),
+      });
+    }
+    if (canDeleteInboxSpace(space)) {
+      actions.push({
         text: t("Delete space"),
         style: "destructive",
         onPress: () =>
@@ -396,8 +410,9 @@ export default function Home() {
               },
             ],
           ),
-      },
-    ]);
+      });
+    }
+    Alert.alert(space.name, undefined, actions);
   }
 
   const createQuickBot = useCallback(async () => {
@@ -589,9 +604,12 @@ export default function Home() {
                   }}
                   style={({ pressed }) => [styles.spaceSelect, pressed && styles.rowPressed]}
                 >
+                  {item.space.avatarUrl ? (
+                    <Image source={{ uri: item.space.avatarUrl }} style={styles.spaceAvatar} />
+                  ) : null}
                   <Text style={styles.spaceTitle}>{item.title}</Text>
                 </Pressable>
-                {canDeleteInboxSpace(item.space) ? (
+                {item.space.canConfigure || canDeleteInboxSpace(item.space) ? (
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={t("Space actions for {name}", { name: item.title })}
@@ -1111,8 +1129,17 @@ function createHomeStyles() {
     },
     spaceSelect: {
       flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
       minHeight: 44,
       justifyContent: "center",
+    },
+    spaceAvatar: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: native.fill,
     },
     spaceTitle: {
       color: native.label,

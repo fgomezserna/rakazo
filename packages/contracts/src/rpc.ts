@@ -61,6 +61,7 @@ import {
   SkillPlaybookSchema,
   SpaceMemoryConfigSchema,
   SpaceNavigationSchema,
+  SpaceProfileSchema,
   SpaceSchema,
   TaughtSkillSchema,
   TeachRecordingEventSchema,
@@ -70,6 +71,7 @@ import {
   UpdateBotInput,
   UpdateExternalConversationPolicyInput,
   UpdateGroupInput,
+  UpdateSpaceInput,
   UsageRecordSchema,
   VoiceCatalogEntrySchema,
   VoiceCredentialSchema,
@@ -146,6 +148,7 @@ export const appContract = {
   spaces: {
     list: oc.output(SpaceNavigationSchema),
     create: oc.input(z.object({ name: z.string().trim().min(1).max(60) })).output(SpaceSchema),
+    update: oc.input(UpdateSpaceInput).output(SpaceProfileSchema),
     remove: oc
       .input(z.object({ spaceId: Id }))
       .output(z.object({ ok: z.literal(true), activeSpaceId: Id })),

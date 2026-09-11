@@ -114,6 +114,14 @@ export default function Layout() {
                     headerBackVisible: false,
                   }}
                 />
+                <Stack.Screen
+                  name="space-settings"
+                  options={{
+                    title: t("Configure workspace"),
+                    presentation: "modal",
+                    gestureEnabled: true,
+                  }}
+                />
                 <Stack.Screen name="group-thread" options={{ title: t("Group") }} />
                 <Stack.Screen name="group-settings" options={{ title: t("Group settings") }} />
                 <Stack.Screen name="bot-settings" options={{ title: t("Chat settings") }} />

@@ -150,6 +150,7 @@ model Space {
   organizationId              String
   organization                Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name                        String
+  avatarUrl                   String?
   isDefault                   Boolean                      @default(false)
   createdByUserId             String?
   createdByUser               User?                        @relation("SpaceCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)

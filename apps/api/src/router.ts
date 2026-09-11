@@ -97,6 +97,7 @@ import {
 import {
   appendEventInTransaction,
   BotMoveBlockedError,
+  CannotConfigureSpaceAsNonOwnerError,
   CannotDeleteDefaultSpaceError,
   CannotDeleteLastSpaceError,
   CannotDeleteSpaceAsNonOwnerError,
@@ -113,6 +114,7 @@ import {
   findModelCredential,
   findSpaceMemoryConfig,
   formatMessagingLinkCode,
+  InvalidSpaceAvatarError,
   InvalidSpaceNameError,
   IsolationError,
   issueMessagingLinkCode,
@@ -133,6 +135,7 @@ import {
   selectSpaceVoicePreference,
   type ThreadEvents,
   touchGroupUpdatedAt,
+  updateSpaceProfileForMember,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -701,14 +704,40 @@ export function createRouter(deps: RouterDeps) {
         return {
           id: space.id,
           name: space.name,
+          avatarUrl: null,
           isDefault: false,
           hasContent: false,
           canDelete: true,
+          canConfigure: true,
           bots: [],
           groups: [],
           externalConversations: [],
           botSections: [],
         };
+      }),
+      update: authed.spaces.update.handler(async ({ context, input }) => {
+        try {
+          return await updateSpaceProfileForMember(deps.prisma, {
+            spaceId: input.spaceId,
+            userId: context.actor.userId,
+            name: input.name,
+            avatarUrl: input.avatarUrl,
+          });
+        } catch (error) {
+          if (error instanceof SpaceNotFoundError) {
+            throw new ORPCError("NOT_FOUND", { message: error.message });
+          }
+          if (error instanceof CannotConfigureSpaceAsNonOwnerError) {
+            throw new ORPCError("FORBIDDEN", { message: error.message });
+          }
+          if (error instanceof SpaceDeletionInProgressError) {
+            throw new ORPCError("CONFLICT", { message: error.message });
+          }
+          if (error instanceof InvalidSpaceNameError || error instanceof InvalidSpaceAvatarError) {
+            throw new ORPCError("BAD_REQUEST", { message: error.message });
+          }
+          throw error;
+        }
       }),
       remove: authed.spaces.remove.handler(async ({ context, input }) => {
         let claimId: string | null = null;
@@ -4858,7 +4887,7 @@ async function spaceNavigationDto(
     select: {
       spaceId: true,
       role: true,
-      space: { select: { name: true, isDefault: true, deletingAt: true } },
+      space: { select: { name: true, avatarUrl: true, isDefault: true, deletingAt: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -4912,6 +4941,8 @@ async function spaceNavigationDto(
     current: {
       id: actor.spaceId,
       name: currentMembership.space.name,
+      avatarUrl: currentMembership.space.avatarUrl,
+      canConfigure: currentMembership.role === "owner",
       bots: currentBots,
       groups: currentGroups,
       externalConversations: externalConversations.filter(
@@ -4925,7 +4956,9 @@ async function spaceNavigationDto(
       return {
         id: membership.spaceId,
         name: membership.space.name,
+        avatarUrl: membership.space.avatarUrl,
         isDefault: membership.space.isDefault,
+        canConfigure: membership.role === "owner",
         hasContent: spacesWithContent.has(membership.spaceId),
         canDelete:
           membership.role === "owner" &&

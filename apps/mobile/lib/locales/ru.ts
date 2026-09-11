@@ -163,6 +163,19 @@ export const RU_MESSAGES: Record<string, string> = {
   "Connect Treg": "Подключить Treg",
   "Connect this provider to use it as your personal model.":
     "Подключите этого провайдера, чтобы использовать его в качестве своей личной модели.",
+  "Configure workspace": "Настроить рабочее пространство",
+  "Choose image": "Выбрать изображение",
+  "Save workspace": "Сохранить рабочее пространство",
+  "Workspace name": "Название рабочего пространства",
+  "Could not update workspace": "Не удалось обновить рабочее пространство",
+  "Could not load workspace": "Не удалось загрузить рабочее пространство",
+  "Could not read that image": "Не удалось прочитать это изображение",
+  "Only the workspace owner can configure it":
+    "Настроить его может только владелец рабочего пространства",
+  "Photo access required": "Требуется доступ к фотографиям",
+  "Allow photo access to choose an avatar.":
+    "Разрешите доступ к фотографиям, чтобы выбрать аватар.",
+  "Reading…": "Чтение…",
   Connected: "Подключено",
   "Connected · {label}": "Подключено · {label}",
   "Connected and using {label}.": "Подключено и используется {label}.",
