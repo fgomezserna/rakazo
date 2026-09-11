@@ -4497,6 +4497,14 @@ function ComputerScreenFrame({
         connected = true;
         window.clearTimeout(timeout);
         onConnectionStateRef.current?.("connected");
+      } else if (data.status === "error") {
+        // Keep the user-facing message generic, but preserve the exact iframe
+        // failure in DevTools. This is essential for module/CORS failures that
+        // otherwise look identical to a VNC socket that is still connecting.
+        console.error("noVNC frame failed to initialize", data.detail);
+        connected = false;
+        window.clearTimeout(timeout);
+        onConnectionStateRef.current?.("disconnected");
       } else if (data.status === "disconnected") {
         connected = false;
         window.clearTimeout(timeout);

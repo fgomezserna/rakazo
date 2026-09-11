@@ -64,6 +64,35 @@
         height: var(--mobile-visual-height, 100dvh);
       }
     </style>
+    <script>
+      // Module scripts can fail before their own body runs (for example when a
+      // decoder import is rejected by the browser's CORS/sandbox checks). Keep
+      // a tiny classic-script bridge in front of the module so the host panel
+      // can distinguish a load failure from a slow VNC handshake.
+      (() => {
+        function reportError(detail) {
+          if (!window.parent || window.parent === window) return;
+          window.parent.postMessage(
+            { source: "rakazo-novnc", status: "error", detail: String(detail || "script-error") },
+            "*",
+          );
+        }
+        window.addEventListener("error", (event) => {
+          const target = event.target;
+          const source = String(
+            event.filename || (target && "src" in target ? target.src : "") || "",
+          );
+          if (source && !source.includes("/novnc/") && !source.endsWith("/embed.html")) return;
+          reportError(event.message || source || "script-error");
+        });
+        window.addEventListener("unhandledrejection", (event) => {
+          const detail = String(event.reason?.message || event.reason || "module-rejection");
+          if (detail.includes("cloudflareinsights.com") || detail.includes("cdn-cgi/rum")) return;
+          reportError(detail);
+        });
+        window.__rakazoNovncReportError = reportError;
+      })();
+    </script>
     <script type="module">
       import { attachHostClipboardPaste } from "./clipboard-bridge.js";
       import Keyboard from "./core/input/keyboard.js";
