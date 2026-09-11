@@ -184,6 +184,27 @@ describe("jsonField union handling", () => {
   it("still treats a plain string schema as a string", () => {
     expect((jsonField({ type: "string" }) as { type?: string }).type).toBe("string");
   });
+
+  it("preserves string constraints and guidance for the model", () => {
+    expect(
+      JSON.stringify(
+        jsonField({
+          type: "string",
+          description: "Lowercase snake_case credential identifier.",
+          pattern: "^[a-z][a-z0-9_]{0,63}$",
+        }),
+      ),
+    ).toContain('"pattern":"^[a-z][a-z0-9_]{0,63}$"');
+    expect(
+      JSON.stringify(
+        jsonField({
+          type: "string",
+          description: "Lowercase snake_case credential identifier.",
+          pattern: "^[a-z][a-z0-9_]{0,63}$",
+        }),
+      ),
+    ).toContain("Lowercase snake_case credential identifier.");
+  });
 });
 
 describe("jsonField const handling", () => {

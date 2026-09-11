@@ -1,7 +1,7 @@
 import type { BotSecretDestination } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { requestWithBotSecret } from "./bot-secrets.js";
+import { normalizeSecretDestination, requestWithBotSecret } from "./bot-secrets.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
 const scope = { userId: "user-1", spaceId: "space-1", botId: "bot-1" };
@@ -47,6 +47,15 @@ async function fixture(auth = destination.auth) {
 }
 
 describe("authenticated secret requests", () => {
+  it("canonicalizes environment-style credential names before validation", () => {
+    expect(
+      normalizeSecretDestination({
+        ...destination,
+        name: "VANGUARD_API_KEY",
+      }),
+    ).toEqual({ ...destination, name: "vanguard_api_key" });
+  });
+
   it.each([
     [{ type: "bearer" }, "Authorization", `Bearer ${secret}`],
     [{ type: "header", name: "X-Api-Key" }, "X-Api-Key", secret],

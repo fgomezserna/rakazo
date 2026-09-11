@@ -31,7 +31,19 @@ function credentialHeader(destination: BotSecretDestination, plaintext: string) 
 }
 
 export function normalizeSecretDestination(value: unknown): BotSecretDestination {
-  const destination = BotSecretDestination.parse(value);
+  // Credential names are internal identifiers, not display labels. Models often
+  // mirror an environment-style label such as `VANGUARD_API_KEY`; canonicalize
+  // that safe identifier before applying the contract so one harmless casing
+  // mistake does not prevent the masked form from opening.
+  const canonical = (() => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const raw = value as Record<string, unknown>;
+    return {
+      ...raw,
+      ...(typeof raw.name === "string" ? { name: raw.name.toLowerCase() } : {}),
+    };
+  })();
+  const destination = BotSecretDestination.parse(canonical);
   return { ...destination, origin: new URL(destination.origin).origin };
 }
 

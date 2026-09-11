@@ -1333,7 +1333,19 @@ export function jsonField(spec: unknown): ReturnType<typeof Type.String> {
     return Type.Array(jsonField(definition.items), options) as never;
   }
   if (type === "object") return jsonSchemaParameters(definition) as never;
-  return Type.String();
+  const options: {
+    description?: string;
+    format?: string;
+    maxLength?: number;
+    minLength?: number;
+    pattern?: string;
+  } = {};
+  if (typeof definition.description === "string") options.description = definition.description;
+  if (typeof definition.format === "string") options.format = definition.format;
+  if (typeof definition.maxLength === "number") options.maxLength = definition.maxLength;
+  if (typeof definition.minLength === "number") options.minLength = definition.minLength;
+  if (typeof definition.pattern === "string") options.pattern = definition.pattern;
+  return Type.String(options);
 }
 
 function summarizeToolResult(result: unknown) {

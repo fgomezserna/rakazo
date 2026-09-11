@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-export const BotSecretName = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
+export const BotSecretName = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,63}$/)
+  .describe("Lowercase snake_case credential identifier, for example vanguard_api_key.");
 
 const SecretHeaderName = z
   .string()
@@ -45,7 +48,10 @@ export const BotSecretDestination = z.object({
       } catch {
         return false;
       }
-    }, "Expected an HTTPS origin without a path, credentials, query, or fragment"),
+    }, "Expected an HTTPS origin without a path, credentials, query, or fragment")
+    .describe(
+      "HTTPS origin only, without a path, query, fragment, or credentials. Put API paths in secret_request.url.",
+    ),
   auth: BotSecretAuth,
 });
 export type BotSecretDestination = z.infer<typeof BotSecretDestination>;
