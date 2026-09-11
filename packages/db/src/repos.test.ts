@@ -383,13 +383,13 @@ describe("createRepos.reorderBots", () => {
 });
 
 describe("createRepos.moveBotToSpace", () => {
-  function moveRepos(activeRunCount = 0) {
+  function moveRepos(activeRunCount = 0, spawnKey: string | null = null) {
     const movedBot = { ...baseBot, spaceId: "ws-3" };
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const botFindFirst = vi
       .fn()
       .mockResolvedValueOnce({ spaceId: "ws-2" })
-      .mockResolvedValueOnce({ ...baseBot, spaceId: "ws-2" });
+      .mockResolvedValueOnce({ ...baseBot, spaceId: "ws-2", spawnKey });
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       spaceMember: {
@@ -462,5 +462,26 @@ describe("createRepos.moveBotToSpace", () => {
       BotMoveBlockedError,
     );
     expect(tx.bot.update).not.toHaveBeenCalled();
+  });
+
+  it("clears a colliding creation key instead of blocking the move", async () => {
+    const { repos, tx } = moveRepos(0, "onboarding:first");
+    const findFirst = tx.bot.findFirst as ReturnType<typeof vi.fn>;
+    findFirst.mockResolvedValueOnce({ id: "existing-bot" });
+
+    const moved = await repos.moveBotToSpace({ ...actor, spaceId: "ws-1" }, "bot-1", "ws-3");
+
+    expect(moved.spaceId).toBe("ws-3");
+    expect(tx.bot.update).toHaveBeenCalledWith({
+      where: { id: "bot-1" },
+      data: {
+        spaceId: "ws-3",
+        sectionId: null,
+        position: 4,
+        computerId: undefined,
+        spawnKey: null,
+      },
+      include: { thread: true, computer: true },
+    });
   });
 });

@@ -594,6 +594,7 @@ export function createRepos(prisma: PrismaClient) {
           throw new BotMoveBlockedError("Move the parent bot together with its child bot");
         }
 
+        let clearSpawnKey = false;
         if (bot.spawnKey) {
           const spawnKeyConflict = await tx.bot.findFirst({
             where: {
@@ -604,7 +605,11 @@ export function createRepos(prisma: PrismaClient) {
             select: { id: true },
           });
           if (spawnKeyConflict) {
-            throw new BotMoveBlockedError("The destination already has a bot with that spawn key");
+            // spawnKey is a per-space creation/idempotency marker, not bot identity.
+            // Keep the destination's marker and clear the moved bot's copy so the
+            // move can preserve the bot and its history without violating the
+            // per-space unique constraint.
+            clearSpawnKey = true;
           }
         }
 
@@ -738,6 +743,7 @@ export function createRepos(prisma: PrismaClient) {
             sectionId: null,
             position: (positions._max.position ?? -1) + 1,
             computerId,
+            ...(clearSpawnKey ? { spawnKey: null } : {}),
           },
           include: { thread: true, computer: true },
         });
