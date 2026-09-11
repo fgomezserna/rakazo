@@ -25,6 +25,8 @@ describe("screen proxy response isolation", () => {
     expect(safeScreenProxyResponseHeaders({ "Content-Security-Policy": policies })).toEqual({
       "content-security-policy": [...policies, "sandbox allow-scripts allow-pointer-lock"],
       "access-control-allow-origin": "*",
+      "cache-control": "no-store",
+      "cdn-cache-control": "no-store",
     });
     expect(policies).toHaveLength(2);
     expect(
@@ -50,10 +52,11 @@ describe("screen proxy response isolation", () => {
     ).toEqual({
       "content-type": "text/javascript",
       "content-encoding": "gzip",
-      "cache-control": "max-age=3600",
       "x-frame-options": "SAMEORIGIN",
       "content-security-policy": ["sandbox allow-scripts allow-pointer-lock"],
       "access-control-allow-origin": "*",
+      "cache-control": "no-store",
+      "cdn-cache-control": "no-store",
     });
   });
 

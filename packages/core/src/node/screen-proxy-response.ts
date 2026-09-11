@@ -21,6 +21,10 @@ export function safeScreenProxyResponseHeaders(headers: IncomingHttpHeaders) {
   safe["content-security-policy"] = [...policies, SCREEN_SANDBOX];
   // Module imports from the opaque sandbox origin still need access to noVNC assets.
   safe["access-control-allow-origin"] = "*";
+  // Screen capability paths contain short-lived, user-scoped state. Do not let a CDN or
+  // browser reuse an asset response from another capability before its CORS policy is checked.
+  safe["cache-control"] = "no-store";
+  safe["cdn-cache-control"] = "no-store";
   return safe;
 }
 
