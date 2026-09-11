@@ -447,6 +447,7 @@ export function ShellPage() {
   const [draggedOverSpaceId, setDraggedOverSpaceId] = useState<string | null>(null);
   const [movingBotId, setMovingBotId] = useState<string | null>(null);
   const [botMoveError, setBotMoveError] = useState<string | null>(null);
+  const spaceSwitchRequest = useRef(0);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [botsSidebarCollapsed, setBotsSidebarCollapsed] = useState(false);
   const focusPromptAbortRef = useRef<AbortController | null>(null);
@@ -1381,18 +1382,43 @@ export function ShellPage() {
   }, [bootstrapMe, botSections, bots, groups, spaces, query]);
 
   const openSpaceChat = useCallback(
-    (spaceId: string, path: string) => {
+    async (spaceId: string, path: string, targetBotId?: string) => {
       setMobileSidebarOpen(false);
+      const request = ++spaceSwitchRequest.current;
       const previousSpaceId = selectedSpaceId();
       // Persist the active space (including primary) so voice/RPC headers match the chat.
       const selectionStored = selectSpace(spaceId);
       if (!selectionStored) return;
-      const previousEffective = previousSpaceId ?? bootstrapMe?.spaceId;
+      const previousEffective = previousSpaceId ?? bootstrapMe?.spaceId ?? spaceId;
       const boundaryChanged = previousEffective !== spaceId;
-      // Soft-navigate within the same space; reload only when the auth boundary changes
-      // so bootstrapped bots/groups match the request header.
-      if (boundaryChanged) {
-        window.location.assign(path);
+      // Load the destination workspace into the existing shell before navigating. The
+      // workspace header is part of the auth boundary, so use an explicit RPC context
+      // instead of relying on a later render to pick up localStorage.
+      if (boundaryChanged && targetBotId) {
+        try {
+          const bootstrap = await rpc.bootstrap({ botId: targetBotId }, { context: { spaceId } });
+          if (request !== spaceSwitchRequest.current) return;
+          const refreshEpoch = ++botsRefreshEpoch.current;
+          botsRefreshApplied.current = refreshEpoch;
+          setBootstrapMe(bootstrap.me);
+          setBots(bootstrap.bots);
+          setBotSections(bootstrap.botSections);
+          setArchivedBots(bootstrap.archivedBots);
+          setArchivedGroups(bootstrap.archivedGroups);
+          setGroups(bootstrap.groups);
+          setSpaces(bootstrap.spaces);
+          setInitialBotsLoaded(true);
+          bootstrappedThread.current = bootstrap.thread;
+          commitSnapshot(bootstrap.thread);
+          commitComputer(bootstrap.thread?.computer ?? null);
+          setRoutines(bootstrap.routines);
+          setRoutinesBotId(bootstrap.thread?.botId ?? null);
+          navigate(path);
+        } catch {
+          if (request !== spaceSwitchRequest.current) return;
+          // Keep navigation recoverable if the soft bootstrap is unavailable.
+          window.location.assign(path);
+        }
         return;
       }
       navigate(path);
@@ -1450,9 +1476,7 @@ export function ShellPage() {
       try {
         await rpc.bots.moveToSpace({ botId: sourceBotId, spaceId: targetSpaceId });
         if (activeBotId.current === sourceBotId) {
-          if (!selectSpace(targetSpaceId))
-            throw new Error(t`Could not select the destination workspace`);
-          window.location.assign(`/app/${sourceBotId}`);
+          await openSpaceChat(targetSpaceId, `/app/${sourceBotId}`, sourceBotId);
           return;
         }
         await refreshBots(false, true);
@@ -1462,7 +1486,7 @@ export function ShellPage() {
         setMovingBotId(null);
       }
     },
-    [movingBotId, refreshBots, t],
+    [movingBotId, openSpaceChat, refreshBots, t],
   );
   const toggleSidebarSection = useCallback(
     (key: string) => {
@@ -2884,6 +2908,7 @@ export function ShellPage() {
                               item.kind === "bot"
                                 ? `/app/${item.chat.id}`
                                 : `/app/g/${item.chat.id}`,
+                              item.kind === "bot" ? item.chat.id : undefined,
                             );
                           }}
                           onContextMenu={(event) => {
