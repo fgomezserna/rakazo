@@ -192,7 +192,7 @@ import {
 import { speaker } from "../lib/tts";
 import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
-import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
+import { CreateGroupForm, GroupSettings, memberName, type SharedBotOption } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
 import {
   draftFromRoutine,
@@ -1684,6 +1684,20 @@ export function ShellPage() {
     [active?.id, groupId, inGroup],
   );
   const transcriptMembers = activeSnapshot?.members ?? activeGroup?.members;
+  const sharedBotOptions = useMemo<SharedBotOption[]>(() => {
+    const currentSpaceId = bootstrapMe?.spaceId;
+    return spaces
+      .filter((space) => space.id !== currentSpaceId)
+      .flatMap((space) =>
+        space.bots.map((bot) => ({
+          id: bot.id,
+          name: bot.name,
+          color: bot.color,
+          status: bot.status,
+          spaceName: space.name,
+        })),
+      );
+  }, [bootstrapMe?.spaceId, spaces]);
   const resolveTranscriptBot = useCallback(
     (botId: string) => {
       const bot = bots.find((candidate) => candidate.id === botId);
@@ -1716,7 +1730,18 @@ export function ShellPage() {
         query: "",
         includeEveryone: inGroup,
         currentGroupId: groupId,
-        bots: bots.map((bot) => ({ id: bot.id, name: bot.name, color: bot.color })),
+        bots: [
+          ...bots.map((bot) => ({ id: bot.id, name: bot.name, color: bot.color })),
+          ...(inGroup
+            ? (transcriptMembers ?? [])
+                .filter((member) => member.shared)
+                .map((member) => ({
+                  id: member.botId,
+                  name: member.name,
+                  color: member.color,
+                }))
+            : []),
+        ],
         groups: groups.map((group) => ({ id: group.id, name: group.name })),
         routines: mentionRoutines.map((routine) => ({
           id: routine.id,
@@ -1727,7 +1752,7 @@ export function ShellPage() {
         })),
         connectors: mentionConnectors,
       }),
-    [bots, groupId, groups, inGroup, mentionConnectors, mentionRoutines],
+    [bots, groupId, groups, inGroup, mentionConnectors, mentionRoutines, transcriptMembers],
   );
   const shellReady =
     initialBotsLoaded &&
@@ -3561,6 +3586,7 @@ export function ShellPage() {
                 key={activeGroup.id}
                 group={activeGroup}
                 bots={bots}
+                sharedBots={sharedBotOptions}
                 onSave={async (input) => {
                   const updated = await rpc.groups.update({ groupId: activeGroup.id, ...input });
                   setGroups((current) =>
@@ -3570,6 +3596,38 @@ export function ShellPage() {
                   await Promise.all([refreshBots(), refreshGroupThread(activeGroup.id)]).catch(
                     () => undefined,
                   );
+                }}
+                onAddGuest={async (botId, mentionOnly) => {
+                  const updated = await rpc.groups.guests.add({
+                    groupId: activeGroup.id,
+                    botId,
+                    mentionOnly,
+                  });
+                  setGroups((current) =>
+                    current.map((group) => (group.id === updated.id ? updated : group)),
+                  );
+                  await refreshGroupThread(activeGroup.id);
+                }}
+                onRemoveGuest={async (botId) => {
+                  const updated = await rpc.groups.guests.remove({
+                    groupId: activeGroup.id,
+                    botId,
+                  });
+                  setGroups((current) =>
+                    current.map((group) => (group.id === updated.id ? updated : group)),
+                  );
+                  await refreshGroupThread(activeGroup.id);
+                }}
+                onSetGuestMode={async (botId, mentionOnly) => {
+                  const updated = await rpc.groups.guests.setMode({
+                    groupId: activeGroup.id,
+                    botId,
+                    mentionOnly,
+                  });
+                  setGroups((current) =>
+                    current.map((group) => (group.id === updated.id ? updated : group)),
+                  );
+                  await refreshGroupThread(activeGroup.id);
                 }}
                 onRemove={async () => {
                   await rpc.groups.remove({ groupId: activeGroup.id });

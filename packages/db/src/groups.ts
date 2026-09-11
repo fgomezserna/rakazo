@@ -36,12 +36,24 @@ type GroupRecord = {
       runs: Array<{ status: string }>;
     };
   }>;
+  guests?: Array<{
+    mentionOnly: boolean;
+    bot: {
+      id: string;
+      name: string;
+      color: string;
+      spaceId: string;
+      space: { name: string };
+      runs: Array<{ status: string }>;
+    };
+  }>;
 };
 
 type SpaceGroupRecord = Pick<
   GroupRecord,
   "id" | "spaceId" | "name" | "pinned" | "sectionId" | "updatedAt" | "members"
 > & {
+  guests?: GroupRecord["guests"];
   thread: {
     unread: boolean;
     messages: Array<{ blocks: unknown }>;
@@ -57,6 +69,19 @@ function mapGroupMembers(members: GroupRecord["members"]): GroupMember[] {
   }));
 }
 
+function mapGroupGuests(guests: NonNullable<GroupRecord["guests"]>): GroupMember[] {
+  return guests.map((guest) => ({
+    botId: guest.bot.id,
+    name: guest.bot.name,
+    color: guest.bot.color,
+    status: guest.bot.runs[0]?.status ?? "idle",
+    shared: true,
+    spaceId: guest.bot.spaceId,
+    spaceName: guest.bot.space.name,
+    mentionOnly: guest.mentionOnly,
+  }));
+}
+
 function mapGroup(group: GroupRecord): Group {
   if (!group.thread) throw new IsolationError("Group is missing its thread");
   const preview = previewFromBlocks(group.thread.messages[0]?.blocks);
@@ -67,7 +92,7 @@ function mapGroup(group: GroupRecord): Group {
     pinned: group.pinned,
     sectionId: group.sectionId,
     archivedAt: group.archivedAt?.toISOString() ?? null,
-    members: mapGroupMembers(group.members),
+    members: [...mapGroupMembers(group.members), ...mapGroupGuests(group.guests ?? [])],
     threadId: group.thread.id,
     preview,
     unread: group.thread.unread,
@@ -84,7 +109,7 @@ function mapSpaceGroup(group: SpaceGroupRecord): SpaceGroup {
     name: group.name,
     pinned: group.pinned,
     sectionId: group.sectionId,
-    members: mapGroupMembers(group.members),
+    members: [...mapGroupMembers(group.members), ...mapGroupGuests(group.guests ?? [])],
     preview: previewFromBlocks(group.thread.messages[0]?.blocks),
     unread: group.thread.unread,
     updatedAt: group.updatedAt.toISOString(),
@@ -144,6 +169,22 @@ const groupInclude = {
     },
     orderBy: { createdAt: "asc" as const },
   },
+  guests: {
+    where: { bot: { archivedAt: null } },
+    include: {
+      bot: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          spaceId: true,
+          space: { select: { name: true } },
+          runs: activeRunSelection,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" as const },
+  },
 } as const;
 
 const groupTargetInclude = {
@@ -156,6 +197,22 @@ const groupTargetInclude = {
           id: true,
           name: true,
           color: true,
+          runs: activeRunSelection,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" as const },
+  },
+  guests: {
+    where: { bot: { archivedAt: null } },
+    include: {
+      bot: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          spaceId: true,
+          space: { select: { name: true } },
           runs: activeRunSelection,
         },
       },
@@ -191,6 +248,7 @@ export function createGroupRepos(prisma: PrismaClient) {
           },
         },
         members: groupInclude.members,
+        guests: groupInclude.guests,
       },
       orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
     });
@@ -367,6 +425,125 @@ export function createGroupRepos(prisma: PrismaClient) {
       };
     },
 
+    async addGroupGuest(
+      actor: Actor,
+      input: { groupId: string; botId: string; mentionOnly?: boolean },
+    ): Promise<Group> {
+      const updated = await prisma.$transaction(async (tx) => {
+        await lockOwnedGroup(tx, actor, input.groupId);
+        const group = await tx.chatGroup.findFirst({
+          where: {
+            id: input.groupId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+            space: { select: { organizationId: true } },
+            members: { where: { botId: input.botId }, select: { id: true } },
+          },
+        });
+        if (!group) throw new IsolationError();
+        if (group.members.length > 0) {
+          throw new IsolationError("That bot is already a local group member");
+        }
+        const bot = await tx.bot.findFirst({
+          where: {
+            id: input.botId,
+            userId: actor.userId,
+            archivedAt: null,
+            spaceId: { not: actor.spaceId },
+            space: { organizationId: group.space.organizationId },
+          },
+          select: { id: true },
+        });
+        if (!bot) throw new IsolationError();
+        await tx.chatGroupGuest.upsert({
+          where: { groupId_botId: { groupId: input.groupId, botId: input.botId } },
+          create: {
+            groupId: input.groupId,
+            botId: input.botId,
+            mentionOnly: input.mentionOnly ?? true,
+          },
+          update: { mentionOnly: input.mentionOnly ?? true },
+        });
+        return tx.chatGroup.findFirstOrThrow({
+          where: { id: input.groupId },
+          include: groupInclude,
+        });
+      });
+      return mapGroup(updated as GroupRecord);
+    },
+
+    async removeGroupGuest(
+      actor: Actor,
+      input: { groupId: string; botId: string },
+    ): Promise<Group> {
+      const updated = await prisma.$transaction(async (tx) => {
+        await lockOwnedGroup(tx, actor, input.groupId);
+        const group = await tx.chatGroup.findFirst({
+          where: {
+            id: input.groupId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            archivedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!group) throw new IsolationError();
+        await tx.chatGroupInvocation.updateMany({
+          where: {
+            groupId: input.groupId,
+            targetBotId: input.botId,
+            status: { in: ["queued", "running"] },
+          },
+          data: {
+            status: "cancelled",
+            error: "Shared bot access was removed before the invocation completed",
+            completedAt: new Date(),
+          },
+        });
+        await tx.chatGroupGuest.deleteMany({
+          where: { groupId: input.groupId, botId: input.botId },
+        });
+        return tx.chatGroup.findFirstOrThrow({
+          where: { id: input.groupId },
+          include: groupInclude,
+        });
+      });
+      return mapGroup(updated as GroupRecord);
+    },
+
+    async setGroupGuestMode(
+      actor: Actor,
+      input: { groupId: string; botId: string; mentionOnly: boolean },
+    ): Promise<Group> {
+      const updated = await prisma.$transaction(async (tx) => {
+        await lockOwnedGroup(tx, actor, input.groupId);
+        const group = await tx.chatGroup.findFirst({
+          where: {
+            id: input.groupId,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            archivedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!group) throw new IsolationError();
+        const changed = await tx.chatGroupGuest.updateMany({
+          where: { groupId: input.groupId, botId: input.botId },
+          data: { mentionOnly: input.mentionOnly },
+        });
+        if (changed.count !== 1) throw new IsolationError();
+        return tx.chatGroup.findFirstOrThrow({
+          where: { id: input.groupId },
+          include: groupInclude,
+        });
+      });
+      return mapGroup(updated as GroupRecord);
+    },
+
     async archiveGroup(actor: Actor, groupId: string) {
       return prisma.$transaction(async (tx) => {
         await lockOwnedGroup(tx, actor, groupId);
@@ -430,6 +607,15 @@ export function createGroupRepos(prisma: PrismaClient) {
             where: { type: "thread.progress", runId: { in: runIds } },
           });
         }
+
+        await tx.chatGroupInvocation.updateMany({
+          where: { groupId, status: { in: ["queued", "running"] } },
+          data: {
+            status: "cancelled",
+            error: "Group was archived before the invocation completed",
+            completedAt: now,
+          },
+        });
 
         await tx.chatGroup.update({
           where: { id: groupId },

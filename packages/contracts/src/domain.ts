@@ -86,6 +86,11 @@ export const GroupMemberSchema = z.object({
   name: z.string(),
   color: z.string(),
   status: z.string().optional(),
+  /** A shared bot runs in its own workspace and is only invited to this group. */
+  shared: z.boolean().optional(),
+  spaceId: Id.optional(),
+  spaceName: z.string().optional(),
+  mentionOnly: z.boolean().optional(),
 });
 export type GroupMember = z.infer<typeof GroupMemberSchema>;
 
@@ -128,6 +133,26 @@ export const UpdateGroupInput = z.object({
   sectionId: Id.nullable().optional(),
 });
 export type UpdateGroupInput = z.infer<typeof UpdateGroupInput>;
+
+export const AddGroupGuestInput = z.object({
+  groupId: Id,
+  botId: Id,
+  mentionOnly: z.boolean().optional(),
+});
+export type AddGroupGuestInput = z.infer<typeof AddGroupGuestInput>;
+
+export const RemoveGroupGuestInput = z.object({
+  groupId: Id,
+  botId: Id,
+});
+export type RemoveGroupGuestInput = z.infer<typeof RemoveGroupGuestInput>;
+
+export const SetGroupGuestModeInput = z.object({
+  groupId: Id,
+  botId: Id,
+  mentionOnly: z.boolean(),
+});
+export type SetGroupGuestModeInput = z.infer<typeof SetGroupGuestModeInput>;
 
 export const GroupDetailSchema = GroupSchema.extend({
   messages: z.array(ThreadMessageSchema).optional(),

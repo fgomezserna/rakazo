@@ -17,6 +17,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { relayGroupGuestInvocation } from "./group-guests.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -329,6 +330,10 @@ export async function returnBotMessageOutcome(
   text: string,
   intent: "result" | "status" = "result",
 ) {
+  // Shared-group runs are deliberately isolated from bot-message context. Their
+  // terminal answer is relayed to the originating group instead of being sent
+  // through the normal same-workspace bot-to-bot channel.
+  if (await relayGroupGuestInvocation(deps, run, text)) return true;
   const source = await loadBotMessageContext(deps.prisma, run.sourceMessageId);
   if (!source) {
     await markBotOutcomeReturned(deps.prisma, run.id);

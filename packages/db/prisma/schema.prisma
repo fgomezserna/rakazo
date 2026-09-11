@@ -365,6 +365,7 @@ model Bot {
   steeringMessages  SteeringMessage[]
   mcpServers        BotMcpServer[]
   groupMembers      ChatGroupMember[]
+  groupGuests       ChatGroupGuest[]
   botSecrets BotSecret[]
 
   externalConversations ExternalConversation[]
@@ -421,6 +422,8 @@ model ChatGroup {
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
   members    ChatGroupMember[]
+  guests     ChatGroupGuest[]
+  invocations ChatGroupInvocation[]
   thread     Thread?
   artifacts  Artifact[]
 
@@ -440,6 +443,46 @@ model ChatGroupMember {
   @@unique([groupId, botId])
   @@index([botId])
   @@map("chat_group_members")
+}
+
+model ChatGroupGuest {
+  id          String    @id @default(cuid())
+  groupId     String
+  group       ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  botId       String
+  bot         Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
+  mentionOnly Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([groupId, botId])
+  @@index([botId])
+  @@map("chat_group_guests")
+}
+
+model ChatGroupInvocation {
+  id             String    @id @default(cuid())
+  groupId        String
+  group          ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupThreadId  String
+  groupMessageId String
+  sourceSpaceId  String
+  targetBotId    String
+  targetSpaceId  String
+  targetThreadId String
+  targetRunId    String?   @unique
+  status         String    @default("queued")
+  prompt         String    @db.Text
+  response       String?   @db.Text
+  error          String?    @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+
+  @@unique([groupMessageId, targetBotId])
+  @@index([groupId, createdAt])
+  @@index([targetBotId, status])
+  @@map("chat_group_invocations")
 }
 
 model Thread {

@@ -1532,6 +1532,17 @@ export function createRouter(deps: RouterDeps) {
         );
         return updated.group;
       }),
+      guests: {
+        add: authed.groups.guests.add.handler(async ({ context, input }) =>
+          groupRepos.addGroupGuest(context.actor, input),
+        ),
+        remove: authed.groups.guests.remove.handler(async ({ context, input }) =>
+          groupRepos.removeGroupGuest(context.actor, input),
+        ),
+        setMode: authed.groups.guests.setMode.handler(async ({ context, input }) =>
+          groupRepos.setGroupGuestMode(context.actor, input),
+        ),
+      },
       archive: authed.groups.archive.handler(async ({ context, input }) => {
         const archived = await groupRepos.archiveGroup(context.actor, input.groupId);
         await Promise.all(

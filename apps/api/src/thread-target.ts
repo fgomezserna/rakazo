@@ -1,6 +1,11 @@
 import { ORPCError } from "@orpc/server";
 import { type JobPublisher, runContinueJob, type SandboxProvider } from "@rakazo/adapter-kit";
-import { cancelComputerRunWork, screenLeaseIdForRun, toComputerRef } from "@rakazo/adapters";
+import {
+  cancelComputerRunWork,
+  queueGroupGuestInvocation,
+  screenLeaseIdForRun,
+  toComputerRef,
+} from "@rakazo/adapters";
 import {
   type Actor,
   GROUP_MEMBER_MIN,
@@ -12,6 +17,7 @@ import {
 } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
+  hasMentionToken,
   isActive,
   projectMessages,
   resolveGroupTargetBotIds,
@@ -252,14 +258,31 @@ async function lockAndLoadGroupMembers(
         include: { bot: { select: { id: true, name: true, color: true } } },
         orderBy: { createdAt: "asc" },
       },
+      guests: {
+        where: { bot: { archivedAt: null } },
+        include: {
+          bot: { select: { id: true, name: true, color: true, spaceId: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      },
     },
   });
   if (!group || group.members.length < GROUP_MEMBER_MIN) throw new IsolationError();
-  return group.members.map((member) => ({
-    botId: member.bot.id,
-    name: member.bot.name,
-    color: member.bot.color,
-  }));
+  return {
+    members: group.members.map((member) => ({
+      botId: member.bot.id,
+      name: member.bot.name,
+      color: member.bot.color,
+    })),
+    guests: group.guests.map((guest) => ({
+      botId: guest.bot.id,
+      name: guest.bot.name,
+      color: guest.bot.color,
+      shared: true as const,
+      spaceId: guest.bot.spaceId,
+      mentionOnly: guest.mentionOnly,
+    })),
+  };
 }
 
 export async function resolveThreadTarget(
@@ -282,19 +305,31 @@ export async function resolveThreadTarget(
   if (input.groupId) {
     const group = await groupRepos.getGroupTarget(actor, input.groupId);
     if (!group.thread) throw new IsolationError();
-    const members = group.members.map((member) => ({
-      botId: member.bot.id,
-      name: member.bot.name,
-      color: member.bot.color,
-      status: member.bot.runs[0]?.status ?? "idle",
-    }));
+    const members = [
+      ...group.members.map((member) => ({
+        botId: member.bot.id,
+        name: member.bot.name,
+        color: member.bot.color,
+        status: member.bot.runs[0]?.status ?? "idle",
+      })),
+      ...group.guests.map((guest) => ({
+        botId: guest.bot.id,
+        name: guest.bot.name,
+        color: guest.bot.color,
+        status: guest.bot.runs[0]?.status ?? "idle",
+        shared: true as const,
+        spaceId: guest.bot.spaceId,
+        spaceName: guest.bot.space.name,
+        mentionOnly: guest.mentionOnly,
+      })),
+    ];
     return {
       kind: "group",
       groupId: group.id,
       threadId: group.thread.id,
       groupName: group.name,
       members,
-      memberBotIds: members.map((member) => member.botId),
+      memberBotIds: group.members.map((member) => member.bot.id),
     };
   }
   throw new IsolationError();
@@ -661,7 +696,7 @@ export async function sendThreadMessage(
               replyToMessageId: input.replyToMessageId,
             },
           });
-          return { message, runs: [active], eventSeq: event.seq };
+          return { message, runs: [active], eventSeq: event.seq, guestTargets: [] };
         }
         const task = await tx.task.create({
           data: {
@@ -706,10 +741,11 @@ export async function sendThreadMessage(
             replyToMessageId: input.replyToMessageId,
           },
         });
-        return { message, runs: [run], eventSeq: event.seq };
+        return { message, runs: [run], eventSeq: event.seq, guestTargets: [] };
       }
 
-      const members = await lockAndLoadGroupMembers(tx, actor, target);
+      const locked = await lockAndLoadGroupMembers(tx, actor, target);
+      const members = locked.members;
       const memberBotIds = members.map((member) => member.botId);
       const mentionTargets = splitMentionTargets(input.mentions);
       const targetBotIds = resolveGroupTargetBotIds({
@@ -717,6 +753,15 @@ export async function sendThreadMessage(
         members: members.map((member) => ({ id: member.botId, name: member.name })),
         explicitMentions: mentionTargets.botMentionIds,
       });
+      const guestTargets = locked.guests
+        .filter(
+          (guest) =>
+            !guest.mentionOnly ||
+            mentionTargets.botMentionIds.includes(guest.botId) ||
+            hasMentionToken(input.text ?? "", guest.name) ||
+            hasMentionToken(input.text ?? "", "everyone"),
+        )
+        .map((guest) => guest.botId);
       const { blocks: attachmentBlocks, artifacts } = await resolveGroupSendAttachments(
         { prisma: tx },
         actor,
@@ -818,7 +863,7 @@ export async function sendThreadMessage(
           replyToMessageId: input.replyToMessageId,
         },
       });
-      return { message, runs, eventSeq: event.seq };
+      return { message, runs, eventSeq: event.seq, guestTargets };
     });
 
   const committed = await withSerializableRetry(commit).catch(async (error) => {
@@ -832,6 +877,21 @@ export async function sendThreadMessage(
     getLogger().error("thread send realtime notification", error);
   });
   await enqueueRunsNeedingContinue(deps.jobs, committed.runs);
+  if (target.kind === "group" && committed.guestTargets.length && committed.message.id) {
+    await Promise.all(
+      committed.guestTargets.map((guestBotId) =>
+        queueGroupGuestInvocation(deps, actor, {
+          groupId: target.groupId,
+          groupThreadId: target.threadId,
+          groupMessageId: committed.message.id,
+          targetBotId: guestBotId,
+          text: input.text ?? "",
+        }).catch((error) => {
+          getLogger().error("group guest invocation", error);
+        }),
+      ),
+    );
+  }
   return sendResult(committed.message, committed.runs);
 }
 
