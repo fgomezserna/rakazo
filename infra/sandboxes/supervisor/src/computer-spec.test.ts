@@ -155,6 +155,8 @@ describe("graphical computer spec", () => {
     expect(start).toMatch(/xdg-settings set default-web-browser rakazo-browser\.desktop/);
     expect(start).not.toMatch(/xdg-mime default rakazo-browser\.desktop .*\|\| true/);
     expect(start).toMatch(/x11vnc .* -viewonly /);
+    expect(start).toMatch(/token-source=\/tmp\/rakazo\/desktop-targets/);
+    expect(start).not.toMatch(/token-source=\/tmp\/rakazo\/view-target-1/);
     expect(browser).toMatch(/\.browser-profiles\/chromium/);
     expect(browser).toMatch(/chromium-screen-\$DISPLAY_NUM/);
     expect(browser).toMatch(/USER_DATA_DIR_SET/);
