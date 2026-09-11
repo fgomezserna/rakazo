@@ -65,10 +65,8 @@
       }
     </style>
     <script>
-      // Module scripts can fail before their own body runs (for example when a
-      // decoder import is rejected by the browser's CORS/sandbox checks). Keep
-      // a tiny classic-script bridge in front of the module so the host panel
-      // can distinguish a load failure from a slow VNC handshake.
+      // Keep a tiny classic-script bridge in front of the bundled noVNC entry
+      // so the host panel can distinguish a load failure from a slow handshake.
       (() => {
         let moduleStarted = false;
         function reportStatus(status, detail) {
@@ -128,77 +126,7 @@
         }, 7_000);
       })();
     </script>
-    <script type="module">
-      import { attachHostClipboardPaste } from "./clipboard-bridge.js";
-      import Keyboard from "./core/input/keyboard.js";
-      import KeyTable from "./core/input/keysym.js";
-      import keysyms from "./core/input/keysymdef.js";
-      import RFB from "./core/rfb.js";
-      import { attachMobileKeyboard, attachMobileTrackpad, isTouchBrowser } from "./mobile-keyboard.js";
-
-      window.__rakazoNovncMarkModuleStarted?.();
-
-      function query(name, fallback) {
-        const match = `${document.location.href}${window.location.hash}`.match(
-          new RegExp(`.*[?&]${name}=([^&#]*)`),
-        );
-        return match ? decodeURIComponent(match[1]) : fallback;
-      }
-
-      function flag(name) {
-        const value = String(query(name, "false")).toLowerCase();
-        return value === "1" || value === "true" || value === "yes";
-      }
-
-      const path = String(query("path", "websockify")).replace(/^\//, "");
-      const prefix = window.location.pathname.replace(/[^/]+$/, "");
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const url = `${protocol}://${window.location.host}${prefix}${path}`;
-      function reportConnection(status, detail) {
-        if (!window.parent || window.parent === window) return;
-        window.parent.postMessage(
-          {
-            source: "rakazo-novnc",
-            status,
-            ...(detail ? { detail } : {}),
-          },
-          "*",
-        );
-      }
-
-      let rfb;
-      try {
-        rfb = new RFB(document.getElementById("screen"), url);
-      } catch (error) {
-        window.__rakazoNovncReportError?.(error?.stack || error);
-        throw error;
-      }
-      rfb.addEventListener("connect", () => reportConnection("connected"));
-      rfb.addEventListener("disconnect", (event) =>
-        reportConnection("disconnected", event.detail?.clean ? "clean" : "connection-lost"),
-      );
-      rfb.addEventListener("securityfailure", (event) =>
-        reportConnection("disconnected", event.detail?.reason ?? "security-failure"),
-      );
-      reportConnection("connecting");
-      rfb.viewOnly = flag("view_only");
-      rfb.scaleViewport = true;
-      rfb.clipViewport = false;
-      if (!rfb.viewOnly) attachHostClipboardPaste(rfb);
-      if (!rfb.viewOnly && isTouchBrowser()) {
-        attachMobileKeyboard(rfb, {
-          button: document.getElementById("mobile-keyboard"),
-          input: document.getElementById("mobile-keyboard-input"),
-          Keyboard,
-          backspaceKeysym: KeyTable.XK_BackSpace,
-          lookupKeysym: keysyms.lookup,
-        });
-        attachMobileTrackpad(rfb, {
-          button: document.getElementById("mobile-trackpad"),
-          surface: document.getElementById("screen"),
-        });
-      }
-    </script>
+    <script defer src="./rakazo-novnc.bundle.js"></script>
   </head>
   <body>
     <div id="screen"></div>

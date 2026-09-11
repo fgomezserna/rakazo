@@ -13,6 +13,19 @@ COPY xcapture.c .
 RUN cc -O3 -fPIC -shared -Wall -Wextra -Werror -o librakazo-xcapture.so xcapture.c \
     -lX11 -lXext -lXdamage -lXfixes -lXtst -lpng
 
+# Debian's noVNC package is intentionally kept as the source of truth for the
+# client. Bundle its ESM graph at image build time so a browser only needs one
+# static JavaScript request through the public screen proxy.
+FROM node:22-bookworm-slim AS novnc-bundle
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    novnc \
+  && npm install --global esbuild@0.28.2 \
+  && rm -rf /var/lib/apt/lists/* /root/.npm
+WORKDIR /build
+COPY novnc-entry.js clipboard-bridge.js mobile-keyboard.js ./
+RUN esbuild novnc-entry.js --bundle --format=iife --platform=browser --target=es2020 \
+    --outfile=rakazo-novnc.bundle.js
+
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
@@ -58,6 +71,7 @@ COPY --chmod=644 fluxbox.menu /etc/rakazo/fluxbox/menu
 COPY --chmod=644 embed.html /usr/share/novnc/embed.html
 COPY --chmod=644 clipboard-bridge.js /usr/share/novnc/clipboard-bridge.js
 COPY --chmod=644 mobile-keyboard.js /usr/share/novnc/mobile-keyboard.js
+COPY --from=novnc-bundle --chmod=644 /build/rakazo-novnc.bundle.js /usr/share/novnc/rakazo-novnc.bundle.js
 # Strip CR so shebangs work even if the build context came from a CRLF checkout.
 RUN ldconfig \
   && sed -i 's/\r$//' /usr/local/bin/rakazo-computer /usr/local/bin/rakazo-computer-control /usr/local/bin/rakazo-browser /usr/local/bin/rakazo-page-browser \

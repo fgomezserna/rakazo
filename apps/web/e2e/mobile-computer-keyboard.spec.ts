@@ -8,6 +8,42 @@ const computerRoot = path.resolve(import.meta.dirname, "../../../infra/sandboxes
 test("touch users can open and dismiss the remote computer keyboard", async ({
   page,
 }, testInfo) => {
+  // The production embed loads one bundled entry instead of the noVNC ESM
+  // graph. Keep this browser fixture self-contained while still exercising the
+  // real clipboard/mobile helpers and entry wiring.
+  const clipboardBridge = (
+    await readFile(path.join(computerRoot, "clipboard-bridge.js"), "utf8")
+  ).replaceAll("export ", "");
+  const mobileKeyboard = (
+    await readFile(path.join(computerRoot, "mobile-keyboard.js"), "utf8")
+  ).replaceAll("export ", "");
+  const entry = (await readFile(path.join(computerRoot, "novnc-entry.js"), "utf8")).replace(
+    /^import[^\n]*\n/gm,
+    "",
+  );
+  const bundle = `(function () {
+${clipboardBridge}
+${mobileKeyboard}
+  class RFB extends EventTarget {
+    constructor() {
+      super();
+      this.viewOnly = false;
+      this.focusOnClick = true;
+      this._rfbConnectionState = "connected";
+      globalThis.__rfbKeys = [];
+    }
+    sendKey(...args) { globalThis.__rfbKeys.push(args); }
+    clipboardPasteFrom() {}
+  }
+  class Keyboard {
+    constructor() { this.onkeyevent = null; }
+    grab() {}
+    ungrab() {}
+  }
+  const KeyTable = { XK_BackSpace: 0xff08 };
+  const keysyms = { lookup: (codePoint) => codePoint };
+${entry}
+})();`;
   const assets = new Map([
     ["/embed.html", await readFile(path.join(computerRoot, "embed.html"), "utf8")],
     [
@@ -15,27 +51,7 @@ test("touch users can open and dismiss the remote computer keyboard", async ({
       await readFile(path.join(computerRoot, "clipboard-bridge.js"), "utf8"),
     ],
     ["/mobile-keyboard.js", await readFile(path.join(computerRoot, "mobile-keyboard.js"), "utf8")],
-    [
-      "/core/rfb.js",
-      `export default class RFB {
-        constructor() {
-          this.viewOnly = false;
-          this.focusOnClick = true;
-          globalThis.__rfbKeys = [];
-        }
-        sendKey(...args) { globalThis.__rfbKeys.push(args); }
-      }`,
-    ],
-    [
-      "/core/input/keyboard.js",
-      `export default class Keyboard {
-        constructor() { this.onkeyevent = null; }
-        grab() {}
-        ungrab() {}
-      }`,
-    ],
-    ["/core/input/keysym.js", "export default { XK_BackSpace: 0xff08 };"],
-    ["/core/input/keysymdef.js", "export default { lookup: (codePoint) => codePoint };"],
+    ["/rakazo-novnc.bundle.js", bundle],
   ]);
 
   await page.addInitScript(() => {

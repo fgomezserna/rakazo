@@ -300,9 +300,9 @@ describe("graphical computer spec", () => {
 
   it("wires host clipboard paste into the chrome-less embed", () => {
     const root = path.resolve(import.meta.dirname, "../../computer");
-    const embed = readFileSync(path.join(root, "embed.html"), "utf8");
-    expect(embed).toMatch(/clipboard-bridge\.js/);
-    expect(embed).toMatch(/attachHostClipboardPaste/);
+    const entry = readFileSync(path.join(root, "novnc-entry.js"), "utf8");
+    expect(entry).toMatch(/clipboard-bridge\.js/);
+    expect(entry).toMatch(/attachHostClipboardPaste/);
   });
 
   it("uses the published host mapping in the default topology even when a container IP exists", () => {
