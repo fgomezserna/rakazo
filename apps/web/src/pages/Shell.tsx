@@ -6171,7 +6171,7 @@ function screenIframeSandbox(url: string | null) {
   if (!url) return undefined;
   try {
     return new URL(url, window.location.href).pathname.startsWith("/novnc/")
-      ? "allow-scripts allow-pointer-lock"
+      ? "allow-scripts allow-same-origin allow-pointer-lock"
       : undefined;
   } catch {
     return undefined;

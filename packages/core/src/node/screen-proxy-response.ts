@@ -1,7 +1,7 @@
 import type { IncomingHttpHeaders } from "node:http";
 
 const SENSITIVE_RESPONSE_HEADERS = new Set(["clear-site-data", "set-cookie", "set-cookie2"]);
-const SCREEN_SANDBOX = "sandbox allow-scripts allow-pointer-lock";
+const SCREEN_SANDBOX = "sandbox allow-scripts allow-same-origin allow-pointer-lock";
 
 function contentTypeValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? undefined) : value;
@@ -31,10 +31,9 @@ export function safeScreenProxyResponseHeaders(headers: IncomingHttpHeaders) {
       safe[name] = value;
     }
   }
-  // Separate CSP policies intersect. An upstream allow-same-origin cannot relax this sandbox,
-  // and existing provider restrictions (including frame-ancestors) remain in force. Keep the
-  // sandbox on document responses; applying it to ESM assets makes Chromium reject imports from
-  // the opaque capability origin even when their CORS headers are valid.
+  // Separate CSP policies intersect, and existing provider restrictions (including
+  // frame-ancestors) remain in force. Keep the sandbox on document responses; applying it to
+  // ESM assets makes Chromium reject imports from the capability document.
   const contentType = safe["content-type"];
   if (isSandboxableDocument(contentType)) {
     safe["content-security-policy"] = [...policies, SCREEN_SANDBOX];
@@ -43,9 +42,8 @@ export function safeScreenProxyResponseHeaders(headers: IncomingHttpHeaders) {
   } else {
     delete safe["content-security-policy"];
   }
-  // Module imports from the opaque sandbox origin use credentials mode `include` in Chromium.
-  // A wildcard ACAO is invalid for that mode; the only origin that can reach this sandboxed
-  // capability document is the literal opaque origin `null`.
+  // Keep the capability response isolated from the upstream provider's origin policy. The
+  // iframe is same-origin with the app only for module loading; its CSP sandbox remains active.
   safe["access-control-allow-origin"] = "null";
   safe["access-control-allow-credentials"] = "true";
   // Screen capability paths contain short-lived, user-scoped state. Do not let a CDN or

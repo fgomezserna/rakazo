@@ -10,7 +10,7 @@ describe("screen proxy response isolation", () => {
     (contentType) => {
       const headers = safeScreenProxyResponseHeaders({ "content-type": contentType });
       expect(headers["content-security-policy"]).toEqual([
-        "sandbox allow-scripts allow-pointer-lock",
+        "sandbox allow-scripts allow-same-origin allow-pointer-lock",
       ]);
       expect(headers["access-control-allow-origin"]).toBe("null");
       expect(headers["access-control-allow-credentials"]).toBe("true");
@@ -34,7 +34,10 @@ describe("screen proxy response isolation", () => {
       "frame-ancestors https://app.example",
     ];
     expect(safeScreenProxyResponseHeaders({ "Content-Security-Policy": policies })).toEqual({
-      "content-security-policy": [...policies, "sandbox allow-scripts allow-pointer-lock"],
+      "content-security-policy": [
+        ...policies,
+        "sandbox allow-scripts allow-same-origin allow-pointer-lock",
+      ],
       "access-control-allow-origin": "null",
       "access-control-allow-credentials": "true",
       "cache-control": "no-store",
@@ -45,7 +48,10 @@ describe("screen proxy response isolation", () => {
       safeScreenProxyResponseHeaders({ "content-security-policy": "script-src 'self'" })[
         "content-security-policy"
       ],
-    ).toEqual(["script-src 'self'", "sandbox allow-scripts allow-pointer-lock"]);
+    ).toEqual([
+      "script-src 'self'",
+      "sandbox allow-scripts allow-same-origin allow-pointer-lock",
+    ]);
   });
 
   it("preserves asset and framing headers while dropping origin mutations and pseudo-headers", () => {
