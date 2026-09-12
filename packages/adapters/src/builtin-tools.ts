@@ -14,6 +14,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "delete_bot",
   "handoff_to_bot",
   "message_bot",
+  "delegate_secret",
 ]);
 
 const scheduleCreateProperties = {
@@ -338,6 +339,43 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       "List saved credential names and destinations available to this bot and user. Values are never returned.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "delegate_secret",
+    description:
+      "Copy one saved credential between two bots owned by the same user in the same organization. Use only when the user explicitly asks for this transfer. By default this bot is the source and target_bot_id or confirm_name is the destination; use source_bot_id or source_name when this bot should receive the credential from another bot. The backend decrypts and re-encrypts it without returning the value to the model or putting it in chat. This action always requires user approval; the destination receives its own independent bot-scoped credential. Set replace only when the user explicitly wants to replace a conflicting destination credential.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Saved credential name on the source bot.",
+        },
+        source_bot_id: {
+          type: "string",
+          description: "Exact id of the source bot when this bot should receive the credential.",
+        },
+        source_name: {
+          type: "string",
+          description: "Exact source bot name when its id is unavailable.",
+        },
+        target_bot_id: {
+          type: "string",
+          description: "Exact id of the destination bot.",
+        },
+        confirm_name: {
+          type: "string",
+          description: "Exact current name of the destination bot when its id is unavailable.",
+        },
+        replace: {
+          type: "boolean",
+          description:
+            "Replace a destination credential with the same name after explicit confirmation.",
+        },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
   },
   {
     name: "secret_request",

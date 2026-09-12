@@ -70,4 +70,33 @@ describe("buildApprovalAskBlock", () => {
     if (block.kind !== "ask") throw new Error("expected ask block");
     expect(block.detail).toContain("stay separate from other spaces");
   });
+
+  it("shows the credential and destination for an explicit bot transfer", () => {
+    const block = buildApprovalAskBlock(
+      "effect-1",
+      "delegate_secret",
+      { name: "crm_api", target_bot_id: "bot-commercial", replace: true },
+      ["token-secret"],
+    );
+
+    expect(block).toMatchObject({
+      kind: "ask",
+      text: "Review before transferring “crm_api” to bot bot-commercial",
+    });
+    expect(JSON.stringify(block)).not.toContain("token-secret");
+  });
+
+  it("shows the source when the current bot imports a credential", () => {
+    const block = buildApprovalAskBlock(
+      "effect-1",
+      "delegate_secret",
+      { name: "crm_api", source_bot_id: "bot-crm" },
+      [],
+    );
+
+    expect(block).toMatchObject({
+      kind: "ask",
+      text: "Review before transferring “crm_api” from bot bot-crm",
+    });
+  });
 });

@@ -54,6 +54,15 @@ function describeApprovalAction(toolName: string, args: Record<string, unknown>)
     const name = args.name ? String(args.name) : "Untitled";
     return `Create space “${name}”`;
   }
+  if (toolName === "delegate_secret") {
+    const credential = args.name ? `“${String(args.name)}”` : "a credential";
+    const source = args.source_bot_id ?? args.source_name;
+    if (source) return `transferring ${credential} from bot ${String(source)}`;
+    const target = args.target_bot_id ?? args.confirm_name;
+    return target
+      ? `transferring ${credential} to bot ${String(target)}`
+      : `transferring ${credential} to another bot`;
+  }
   const target = pickScopeLabel(args);
   return target ? `${toolName} → ${target}` : toolName;
 }

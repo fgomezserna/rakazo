@@ -34,4 +34,8 @@ Calling `request_secret` again with the same name and configuration returns the 
 
 The model has no tool for reading these values, and the backend removes direct and common encoded echoes from API responses. The approved service still receives the credential: redaction cannot defend against a malicious service deliberately transforming it. Choose a service you trust and use appropriately scoped credentials.
 
+## Explicit bot-to-bot transfer
+
+When the user explicitly asks one of their bots to pass a saved credential to another of their bots, either bot can call `delegate_secret`: the source uses `target_bot_id`/`confirm_name`, while the destination uses `source_bot_id`/`source_name`. The action always pauses for user approval, verifies that both bots belong to the same user and organization, and creates an independent credential in the destination bot's scope. The backend decrypts and re-encrypts the value in memory; the value is never returned to the model, sent through `message_bot`, or written to chat, files, prompts, or shell commands. The destination can then use its own `list_secrets` and `secret_request` flow. Revoke or replace the destination copy independently when needed.
+
 This boundary supports authenticated HTTP requests. Injecting credentials into arbitrary AI-controlled shell commands, files or environment variables would let those commands read them, so those paths are not exposed. APIs needing request signing, OAuth refresh, multiple credentials or custom protocols should use a connector adapter. Existing `request_secret` calls with a `connectionId` retain their one-use connector-code flow; website sign-in uses `request_takeover`.

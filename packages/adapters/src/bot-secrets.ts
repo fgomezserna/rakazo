@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { BotSecretDestination, SecretHttpRequest } from "@rakazo/contracts";
+import { BotSecretDestination, BotSecretName, SecretHttpRequest } from "@rakazo/contracts";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { combineSignals, redactConnectorPayload } from "./connector-safety.js";
 import { createSafeRemoteFetch, type RemoteTransportDependencies } from "./remote-mcp.js";
@@ -106,6 +106,274 @@ export async function storeBotSecret(input: {
     await tx.botSecret.create({
       data: { id, ...scopeFields(scope), ...destination, ciphertext: encrypted.ciphertext },
     });
+  }
+}
+
+/**
+ * Copy a saved credential between two bots after an explicit user-approved tool
+ * call. The value is decrypted and re-encrypted only inside the backend; it is
+ * never returned to the model, written to a message, or placed in a prompt.
+ *
+ * This is deliberately a copy, not an ambient cross-bot lookup: the destination
+ * gets its own bot-scoped credential that can later be revoked independently.
+ */
+export async function delegateBotSecret(input: {
+  prisma: PrismaClient;
+  secretStore: EncryptedSecretStore;
+  source: BotSecretScope;
+  name: string;
+  sourceBotId?: string;
+  sourceName?: string;
+  targetBotId?: string;
+  targetName?: string;
+  replace?: boolean;
+}) {
+  const name = BotSecretName.safeParse(input.name.trim().toLowerCase());
+  if (!name.success) return { ok: false as const, error: "A valid credential name is required." };
+
+  const requestedSourceBotId = input.sourceBotId?.trim() || undefined;
+  const requestedSourceName = input.sourceName?.trim() || undefined;
+  if (requestedSourceBotId && requestedSourceName) {
+    return { ok: false as const, error: "Choose source_bot_id or source_name, not both." };
+  }
+  const importing = Boolean(requestedSourceBotId || requestedSourceName);
+  if (importing && (input.targetBotId || input.targetName)) {
+    return {
+      ok: false as const,
+      error: "Choose source_bot_id when this bot receives a credential, not a destination bot.",
+    };
+  }
+  const sourceBotId = requestedSourceBotId ?? input.source.botId;
+
+  let sourceBot = await input.prisma.bot.findFirst({
+    where: {
+      id: sourceBotId,
+      userId: input.source.userId,
+      archivedAt: null,
+      ...(sourceBotId === input.source.botId ? { spaceId: input.source.spaceId } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      spaceId: true,
+      space: { select: { organizationId: true } },
+    },
+  });
+  if (!sourceBot) return { ok: false as const, error: "The source bot is unavailable." };
+
+  if (requestedSourceName) {
+    const sourceCandidates = await input.prisma.bot.findMany({
+      where: {
+        userId: input.source.userId,
+        archivedAt: null,
+        space: { organizationId: sourceBot.space.organizationId },
+      },
+      select: {
+        id: true,
+        name: true,
+        spaceId: true,
+        space: { select: { organizationId: true } },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    const exact = sourceCandidates.filter((candidate) => candidate.name === requestedSourceName);
+    const caseInsensitive = sourceCandidates.filter(
+      (candidate) => candidate.name.toLowerCase() === requestedSourceName.toLowerCase(),
+    );
+    const resolved =
+      exact.length === 1 ? exact[0] : caseInsensitive.length === 1 ? caseInsensitive[0] : undefined;
+    if (!resolved) {
+      return { ok: false as const, error: "Provide one exact or unambiguous source bot name." };
+    }
+    sourceBot = resolved;
+  }
+
+  const targetBotId = importing ? input.source.botId : input.targetBotId;
+  const targetBots = targetBotId
+    ? await input.prisma.bot.findMany({
+        where: {
+          id: targetBotId,
+          userId: input.source.userId,
+          archivedAt: null,
+          space: { organizationId: sourceBot.space.organizationId },
+        },
+        select: {
+          id: true,
+          name: true,
+          spaceId: true,
+          thread: { select: { id: true } },
+        },
+      })
+    : await input.prisma.bot.findMany({
+        where: {
+          userId: input.source.userId,
+          archivedAt: null,
+          space: { organizationId: sourceBot.space.organizationId },
+        },
+        select: {
+          id: true,
+          name: true,
+          spaceId: true,
+          thread: { select: { id: true } },
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
+
+  const targetName = input.targetName?.trim();
+  const namedTargets = targetName
+    ? targetBots.filter((candidate) => candidate.name === targetName)
+    : [];
+  const caseInsensitiveTargets = targetName
+    ? targetBots.filter((candidate) => candidate.name.toLowerCase() === targetName.toLowerCase())
+    : [];
+  const target = targetBotId
+    ? targetBots[0]
+    : targetName
+      ? namedTargets.length === 1
+        ? namedTargets[0]
+        : caseInsensitiveTargets.length === 1
+          ? caseInsensitiveTargets[0]
+          : undefined
+      : undefined;
+  if (!target) {
+    return {
+      ok: false as const,
+      error: "Provide one exact target bot id or an unambiguous target bot name.",
+    };
+  }
+  if (target.id === sourceBot.id) {
+    return { ok: false as const, error: "A bot cannot delegate a credential to itself." };
+  }
+  if (!importing && targetName && target.name !== targetName) {
+    return { ok: false as const, error: "target_name must exactly match the target bot name." };
+  }
+  if (!target.thread) {
+    return { ok: false as const, error: "The target bot has no chat to receive the credential." };
+  }
+
+  try {
+    return await input.prisma.$transaction(async (tx) => {
+      for (const botId of [sourceBot.id, target.id].sort()) {
+        await tx.$queryRaw`SELECT id FROM bots WHERE id = ${botId} FOR UPDATE`;
+      }
+
+      const source = await tx.botSecret.findFirst({
+        where: {
+          userId: input.source.userId,
+          spaceId: sourceBot.spaceId,
+          botId: sourceBot.id,
+          name: name.data,
+        },
+      });
+      if (!source) {
+        return { ok: false as const, error: "Credential is unavailable on the source bot." };
+      }
+
+      const currentTarget = await tx.bot.findFirst({
+        where: {
+          id: target.id,
+          userId: input.source.userId,
+          archivedAt: null,
+          space: { organizationId: sourceBot.space.organizationId },
+        },
+        select: { id: true, name: true, spaceId: true, thread: { select: { id: true } } },
+      });
+      if (!currentTarget?.thread) {
+        return { ok: false as const, error: "The target bot is no longer available." };
+      }
+
+      const destination = normalizeSecretDestination({
+        name: source.name,
+        origin: source.origin,
+        auth: source.auth,
+      });
+      const existing = await tx.botSecret.findFirst({
+        where: {
+          userId: input.source.userId,
+          spaceId: currentTarget.spaceId,
+          botId: currentTarget.id,
+          name: destination.name,
+        },
+      });
+      if (existing && !sameSecretDestination(normalizeSecretDestination(existing), destination)) {
+        if (!input.replace) {
+          return {
+            ok: false as const,
+            error:
+              "The target already has a different credential with that name. Use replace after confirming.",
+          };
+        }
+      } else if (existing && !input.replace) {
+        return {
+          ok: true as const,
+          alreadyAvailable: true as const,
+          targetBotId: currentTarget.id,
+          targetBotName: currentTarget.name,
+          ...destination,
+        };
+      }
+      if (
+        !existing &&
+        (await tx.botSecret.count({
+          where: {
+            userId: input.source.userId,
+            spaceId: currentTarget.spaceId,
+            botId: currentTarget.id,
+          },
+        })) >= 100
+      ) {
+        return { ok: false as const, error: "The target bot has reached its credential limit." };
+      }
+
+      const plaintext = input.secretStore.load(source.ciphertext, source.id);
+      const targetSecretId = existing?.id ?? randomBytes(12).toString("hex");
+      const encrypted = await input.secretStore.put(
+        plaintext,
+        {
+          operationId: `delegate:${sourceBot.id}:${currentTarget.id}:${destination.name}`,
+          traceId: targetSecretId,
+          userId: input.source.userId,
+          spaceId: currentTarget.spaceId,
+          botId: currentTarget.id,
+          signal: new AbortController().signal,
+        },
+        targetSecretId,
+      );
+      if (existing) {
+        await tx.botSecret.update({
+          where: { id: existing.id },
+          data: {
+            origin: destination.origin,
+            auth: destination.auth as Prisma.InputJsonValue,
+            ciphertext: encrypted.ciphertext,
+          },
+        });
+      } else {
+        await tx.botSecret.create({
+          data: {
+            id: targetSecretId,
+            userId: input.source.userId,
+            spaceId: currentTarget.spaceId,
+            botId: currentTarget.id,
+            name: destination.name,
+            origin: destination.origin,
+            auth: destination.auth as Prisma.InputJsonValue,
+            ciphertext: encrypted.ciphertext,
+          },
+        });
+      }
+      return {
+        ok: true as const,
+        transferred: true as const,
+        sourceBotId: sourceBot.id,
+        sourceBotName: sourceBot.name,
+        targetBotId: currentTarget.id,
+        targetBotName: currentTarget.name,
+        ...destination,
+      };
+    });
+  } catch {
+    return { ok: false as const, error: "Credential transfer failed without exposing its value." };
   }
 }
 

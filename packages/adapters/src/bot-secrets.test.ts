@@ -1,7 +1,11 @@
 import type { BotSecretDestination } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { normalizeSecretDestination, requestWithBotSecret } from "./bot-secrets.js";
+import {
+  delegateBotSecret,
+  normalizeSecretDestination,
+  requestWithBotSecret,
+} from "./bot-secrets.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
 const scope = { userId: "user-1", spaceId: "space-1", botId: "bot-1" };
@@ -173,5 +177,141 @@ describe("authenticated secret requests", () => {
     controller.abort();
     expect(await pending).toMatchObject({ error: expect.any(String) });
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("explicit credential delegation", () => {
+  it("copies the encrypted value across same-user workspaces without exposing it", async () => {
+    const sourceScope = { userId: "user-1", spaceId: "space-source", botId: "bot-source" };
+    const encrypted = await secretStore.put(
+      secret,
+      {
+        ...sourceScope,
+        operationId: "source",
+        traceId: "source",
+        signal: new AbortController().signal,
+      },
+      "source-secret",
+    );
+    const sourceRow = { ...sourceScope, ...destination, ...encrypted };
+    const targetBot = {
+      id: "bot-target",
+      name: "Comercial",
+      spaceId: "space-target",
+      thread: { id: "thread-target" },
+    };
+    const create = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      botSecret: {
+        findFirst: vi.fn(({ where }: { where: { botId?: string } }) =>
+          where.botId === "bot-source" ? sourceRow : null,
+        ),
+        count: vi.fn().mockResolvedValue(0),
+        create,
+        update: vi.fn(),
+      },
+      bot: { findFirst: vi.fn().mockResolvedValue(targetBot) },
+    };
+    const prisma = {
+      bot: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "bot-source",
+          name: "Gestor CRM",
+          spaceId: "space-source",
+          space: { organizationId: "org-1" },
+        }),
+        findMany: vi.fn().mockResolvedValue([targetBot]),
+      },
+      $transaction: vi.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const result = await delegateBotSecret({
+      prisma,
+      secretStore,
+      source: sourceScope,
+      name: destination.name,
+      targetBotId: targetBot.id,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      transferred: true,
+      targetBotId: targetBot.id,
+      targetBotName: targetBot.name,
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    const copied = create.mock.calls[0]?.[0]?.data as {
+      id: string;
+      ciphertext: string;
+    };
+    expect(secretStore.load(copied.ciphertext, copied.id)).toBe(secret);
+    expect(copied.id).not.toBe("source-secret");
+  });
+
+  it("lets the destination bot import explicitly from a source bot", async () => {
+    const sourceScope = { userId: "user-1", spaceId: "space-source", botId: "bot-source" };
+    const destinationScope = { userId: "user-1", spaceId: "space-target", botId: "bot-target" };
+    const encrypted = await secretStore.put(
+      secret,
+      {
+        ...sourceScope,
+        operationId: "source-import",
+        traceId: "source-import",
+        signal: new AbortController().signal,
+      },
+      "source-import-secret",
+    );
+    const sourceRow = { ...sourceScope, ...destination, ...encrypted };
+    const sourceBot = {
+      id: "bot-source",
+      name: "Gestor CRM",
+      spaceId: "space-source",
+      space: { organizationId: "org-1" },
+    };
+    const targetBot = {
+      id: "bot-target",
+      name: "Comercial",
+      spaceId: "space-target",
+      thread: { id: "thread-target" },
+    };
+    const create = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      botSecret: {
+        findFirst: vi.fn(({ where }: { where: { botId?: string } }) =>
+          where.botId === sourceBot.id ? sourceRow : null,
+        ),
+        count: vi.fn().mockResolvedValue(0),
+        create,
+        update: vi.fn(),
+      },
+      bot: { findFirst: vi.fn().mockResolvedValue(targetBot) },
+    };
+    const prisma = {
+      bot: {
+        findFirst: vi.fn().mockResolvedValue(sourceBot),
+        findMany: vi.fn().mockResolvedValue([targetBot]),
+      },
+      $transaction: vi.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    } as unknown as PrismaClient;
+
+    const result = await delegateBotSecret({
+      prisma,
+      secretStore,
+      source: destinationScope,
+      sourceBotId: sourceBot.id,
+      name: destination.name,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      transferred: true,
+      sourceBotId: sourceBot.id,
+      targetBotId: targetBot.id,
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    const copied = create.mock.calls[0]?.[0]?.data as { id: string; ciphertext: string };
+    expect(secretStore.load(copied.ciphertext, copied.id)).toBe(secret);
   });
 });
