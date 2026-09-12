@@ -5396,7 +5396,7 @@ const Composer = memo(function Composer({
         >
           <Plus size={17} strokeWidth={1.8} />
         </Button>
-        <div className="flex min-w-0 flex-1 flex-wrap items-end gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-1.5">
           {selectedSkill ? (
             <span
               data-testid="skill-chip"

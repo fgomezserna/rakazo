@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { jsonSchemaParameters } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("keeps function parameter roots explicitly object-shaped for unions", () => {
+    const schema = jsonSchemaParameters({
+      oneOf: [
+        { type: "object", properties: { credential: { type: "string" } } },
+        { type: "object", properties: { connectionId: { type: "string" } } },
+      ],
+    }) as unknown as { type?: unknown; anyOf?: unknown[] };
+    expect(schema.type).toBe("object");
+    expect(schema.anyOf).toHaveLength(2);
+  });
+
   it("keeps primitive enums as literal unions", () => {
     const schema = jsonSchemaParameters({
       type: "object",

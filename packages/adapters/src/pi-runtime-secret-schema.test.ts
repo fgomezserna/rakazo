@@ -106,9 +106,11 @@ describe("request_secret parameters", () => {
 
   it("keeps exclusivity when converted for the PI model", () => {
     const converted = jsonSchemaParameters(requestSecretSchema()) as {
+      type?: unknown;
       anyOf?: unknown[];
       oneOf?: unknown[];
     };
+    expect(converted.type).toBe("object");
     // Type.Union serializes as anyOf; the model must still see two exclusive shapes.
     const variants = converted.anyOf ?? converted.oneOf ?? [];
     expect(variants.length).toBe(2);

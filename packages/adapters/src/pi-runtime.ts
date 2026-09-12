@@ -1276,9 +1276,18 @@ export function jsonSchemaParameters(
       ? schema.anyOf
       : undefined;
   if (alternatives && alternatives.length > 0 && schema.properties == null) {
-    return Type.Union(
+    // OpenAI-compatible function tools require the parameters root to be an
+    // object. A bare Type.Union serializes as `{ anyOf: [...] }`, which some
+    // providers (including Console Go) normalize to `type: null` and reject.
+    // Keep the mutually-exclusive branches while making the function boundary
+    // explicitly object-shaped.
+    const union = Type.Union(
       alternatives.map((variant) => jsonSchemaParameters(variant as Record<string, unknown>)),
-    ) as unknown as ReturnType<typeof Type.Object>;
+    );
+    return {
+      ...union,
+      type: "object",
+    } as unknown as ReturnType<typeof Type.Object>;
   }
   const properties = (schema.properties ?? {}) as Record<string, unknown>;
   const required = new Set(Array.isArray(schema.required) ? schema.required.map(String) : []);

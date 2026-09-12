@@ -53,6 +53,22 @@ test("mention picker completes with Enter and Tab", async ({ page }, testInfo) =
   ).toBeVisible();
   await expect(composer).toBeFocused();
   await expect(composer).toHaveAttribute("aria-expanded", "false");
+  await composer.fill("first line\nsecond line\nthird line");
+  await expect
+    .poll(() => composer.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeGreaterThan(40);
+  const multilineLayout = await page.getByTestId("composer-bar").evaluate((bar) => {
+    const chip = bar.querySelector<HTMLElement>('[data-testid="mention-chip"]');
+    const textarea = bar.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]');
+    if (!chip || !textarea) throw new Error("multiline composer elements not found");
+    return {
+      chipTop: chip.getBoundingClientRect().top,
+      textareaTop: textarea.getBoundingClientRect().top,
+      textareaHeight: textarea.getBoundingClientRect().height,
+    };
+  });
+  expect(multilineLayout.textareaHeight).toBeGreaterThan(24);
+  expect(multilineLayout.chipTop - multilineLayout.textareaTop).toBeLessThanOrEqual(6);
   await captureScreenshot(page, testInfo, "mention-picker-keyboard-completed");
 
   await page.getByRole("button", { name: "Remove mention Research Writer" }).click();

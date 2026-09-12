@@ -29,6 +29,7 @@ const scheduleCreateProperties = {
 
 /** Keep repeat and one-shot schedules mutually exclusive at the model boundary. */
 const scheduleCreateInputSchema = {
+  type: "object",
   oneOf: [
     {
       type: "object",
@@ -306,6 +307,7 @@ export const builtinAgentTools: ConnectorTool[] = [
     // Exactly one destination: credential XOR connectionId. Sibling optionals
     // looked schema-valid to models but the executor rejects both and neither.
     inputSchema: {
+      type: "object",
       oneOf: [
         {
           type: "object",
