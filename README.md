@@ -95,8 +95,8 @@ cp .env.example .env
 Set `POSTGRES_PASSWORD` (for example `openssl rand -hex 16`), then put the same value in
 `DATABASE_URL`. Set `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY`, and `SCREEN_PROXY_SECRET` to
 independent long random values. Docker sandboxes also need a dedicated
-`SANDBOX_SUPERVISOR_TOKEN`. You can also set `OPENROUTER_API_KEY`, or connect a supported
-model provider during onboarding.
+`SANDBOX_SUPERVISOR_TOKEN`. You can set `OPENCODE_API_KEY` for the default OpenCode Go / DeepSeek
+V4.1 Flash model, choose `OPENROUTER_API_KEY`, or connect a supported model provider during onboarding.
 
 Managed app catalogs are optional. Set `COMPOSIO_API_KEY` for Composio, or the
 `PIPEDREAM_CLIENT_ID`, `PIPEDREAM_CLIENT_SECRET`, and `PIPEDREAM_PROJECT_ID` trio for Pipedream

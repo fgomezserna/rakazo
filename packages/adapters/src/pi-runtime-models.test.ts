@@ -17,6 +17,7 @@ describe("request model catalogs", () => {
     ["openrouter", "openai/gpt-5.6-luna"],
     ["openai-codex", "gpt-6-astra"],
     ["anthropic", "claude-fable-5-1"],
+    ["opencode-go", "deepseek-v4.1-flash"],
   ])("offers and resolves %s/%s with vision", (provider, id) => {
     const entry = listPiCatalog().find((model) => model.provider === provider && model.id === id);
     expect(entry).toBeDefined();

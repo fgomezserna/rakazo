@@ -113,8 +113,8 @@ describe("createBackgroundJobHandlers", () => {
     await expect(
       executor.resolveModel({ userId: "user-1", spaceId: "workspace-1" }),
     ).resolves.toEqual({
-      provider: "openrouter",
-      id: "openai/gpt-5.6-luna",
+      provider: "opencode-go",
+      id: "deepseek-v4.1-flash",
       apiKey: "deployment-key",
       baseUrl: undefined,
       thinkingLevel: null,

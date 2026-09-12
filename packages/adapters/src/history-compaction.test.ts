@@ -393,8 +393,8 @@ describe("compactHistory", () => {
     const [request] = harness.runtime.run.mock.calls[0]!;
     expect(request.tools).toEqual([]);
     expect(request.model).toEqual({
-      provider: "openrouter",
-      id: "openai/gpt-5.6-luna",
+      provider: "opencode-go",
+      id: "deepseek-v4.1-flash",
       apiKey: "openrouter-key",
     });
     expect(request.prompt).toContain("message 0");
@@ -802,7 +802,7 @@ describe("compactHistory", () => {
 
     const [request] = harness.runtime.run.mock.calls[0]!;
     expect(request.model).toEqual({
-      provider: "openrouter",
+      provider: "opencode-go",
       id: "moonshotai/kimi-k2",
       apiKey: "openrouter-key",
     });

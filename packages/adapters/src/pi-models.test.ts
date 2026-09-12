@@ -47,6 +47,15 @@ describe("Pi model catalog", () => {
       catalog.filter((entry) => entry.provider === provider).map((entry) => entry.id);
     expect(ids("xai")).toContain("grok-4.6");
     expect(ids("opencode-go")).toContain("glm-5.3");
+    expect(ids("opencode-go")).toContain("deepseek-v4.1-flash");
+    const deepseek = catalog.find(
+      (entry) => entry.provider === "opencode-go" && entry.id === "deepseek-v4.1-flash",
+    );
+    expect(deepseek).toMatchObject({
+      label: "DeepSeek V4.1 Flash",
+      reasoning: true,
+      thinkingLevels: ["off", "high", "max"],
+    });
     const grok46 = catalog.find((entry) => entry.provider === "xai" && entry.id === "grok-4.6");
     expect(grok46).toMatchObject({
       reasoning: true,

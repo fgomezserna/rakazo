@@ -259,6 +259,7 @@ describe("Pi agent thinking level", () => {
   });
 
   it("uses the trimmed configured default for scripted requests", async () => {
+    vi.stubEnv("PI_DEFAULT_PROVIDER", "openrouter");
     vi.stubEnv("PI_DEFAULT_MODEL", "  stealth/ox-alpha  ");
 
     await runWithModel("scripted", "scripted");

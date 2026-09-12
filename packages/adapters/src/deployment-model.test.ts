@@ -3,13 +3,22 @@ import { resolveDeploymentModel } from "./deployment-model.js";
 
 describe("resolveDeploymentModel", () => {
   it("pairs the deployment model key with the provider it belongs to", () => {
-    const both = { OPENROUTER_API_KEY: "or-key", ANTHROPIC_API_KEY: "sk-ant-key" };
+    const both = {
+      OPENROUTER_API_KEY: "or-key",
+      ANTHROPIC_API_KEY: "sk-ant-key",
+      OPENCODE_API_KEY: "go-key",
+    };
     expect(resolveDeploymentModel(both)).toEqual({
+      provider: "opencode-go",
+      model: "deepseek-v4.1-flash",
+      key: "go-key",
+    });
+    // The whole point: switching the provider switches the key with it.
+    expect(resolveDeploymentModel({ ...both, PI_DEFAULT_PROVIDER: "openrouter" })).toEqual({
       provider: "openrouter",
       model: "openai/gpt-5.6-luna",
       key: "or-key",
     });
-    // The whole point: switching the provider switches the key with it.
     expect(resolveDeploymentModel({ ...both, PI_DEFAULT_PROVIDER: "anthropic" })).toEqual({
       provider: "anthropic",
       model: "claude-sonnet-5",

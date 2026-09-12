@@ -1,11 +1,12 @@
 import type { Models } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
+import { resolveDeploymentModel } from "./deployment-model.js";
 import { registerLocalProvider } from "./pi-local-provider.js";
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   registerOpenAiCompatibleCatalog,
 } from "./pi-openai-compatible-provider.js";
+import { registerOpenCodeGoCatalog } from "./pi-opencode-go-models.js";
 
 /** Computer tools whose results include screenshots for the model. */
 export const IMAGE_RETURNING_COMPUTER_TOOLS = new Set([
@@ -20,7 +21,9 @@ export const MODEL_CANNOT_SEE_MESSAGE = "This bot's model cannot see; pick a vis
 let catalogModelsCache: Models | undefined;
 
 function catalogModels(): Models {
-  catalogModelsCache ??= registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels()));
+  catalogModelsCache ??= registerOpenCodeGoCatalog(
+    registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels())),
+  );
   return catalogModelsCache;
 }
 
@@ -35,9 +38,10 @@ export function resolveModelRefForVisionCheck(
   const normalizedProvider = provider.trim();
   const normalizedId = modelId.trim();
   if (normalizedProvider === "scripted" || normalizedId === "scripted") {
+    const deployment = resolveDeploymentModel();
     return {
-      provider: "openrouter",
-      id: process.env.PI_DEFAULT_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL_ID,
+      provider: deployment.provider,
+      id: process.env.PI_DEFAULT_MODEL?.trim() || deployment.model,
     };
   }
   return { provider: normalizedProvider, id: normalizedId };
@@ -47,7 +51,7 @@ export function resolveModelRefForVisionCheck(
  * Whether the selected model accepts image input, per the Pi model catalog's
  * declared `input` modalities. Unknown models are treated as text-only.
  * The `scripted` placeholder is resolved the same way Pi does (env default /
- * GPT-5.6 Luna fallback) before the catalog check.
+ * deployment default) before the catalog check.
  */
 export function modelAcceptsImageInput(provider: string, modelId: string): boolean {
   const resolved = resolveModelRefForVisionCheck(provider, modelId);

@@ -23,16 +23,19 @@ describe("model vision gating for computer tools", () => {
     expect(modelAcceptsImageInput("openrouter", "deepseek/deepseek-v4-flash-vision-exp")).toBe(
       true,
     );
+    expect(modelAcceptsImageInput("opencode-go", "deepseek-v4.1-flash")).toBe(true);
   });
 
   it("resolves the scripted placeholder like Pi before checking vision", () => {
+    vi.stubEnv("PI_DEFAULT_PROVIDER", "opencode-go");
     vi.stubEnv("PI_DEFAULT_MODEL", "");
     expect(resolveModelRefForVisionCheck("scripted", "scripted")).toEqual({
-      provider: "openrouter",
-      id: "openai/gpt-5.6-luna",
+      provider: "opencode-go",
+      id: "deepseek-v4.1-flash",
     });
     expect(modelAcceptsImageInput("scripted", "scripted")).toBe(true);
 
+    vi.stubEnv("PI_DEFAULT_PROVIDER", "openrouter");
     vi.stubEnv("PI_DEFAULT_MODEL", "openai/gpt-4o");
     expect(resolveModelRefForVisionCheck("scripted", "scripted")).toEqual({
       provider: "openrouter",

@@ -10,6 +10,13 @@ import {
 } from "./auto-review.js";
 
 describe("resolveAutoReviewChecker", () => {
+  it("uses DeepSeek V4.1 Flash as the deployment default", () => {
+    expect(resolveAutoReviewChecker({})).toEqual({
+      provider: "opencode-go",
+      model: "deepseek-v4.1-flash",
+    });
+  });
+
   it("prefers explicit env overrides", () => {
     expect(
       resolveAutoReviewChecker({
@@ -55,6 +62,11 @@ describe("isAutoReviewCheckerConfigured", () => {
           PI_DEFAULT_MODEL: "x",
           OPENROUTER_API_KEY: "or-key",
         },
+      }),
+    ).toBe(true);
+    expect(
+      isAutoReviewCheckerConfigured({
+        env: { OPENCODE_API_KEY: "go-key" },
       }),
     ).toBe(true);
     expect(

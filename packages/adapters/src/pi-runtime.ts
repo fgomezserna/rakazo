@@ -28,7 +28,12 @@ import type {
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
 import { builtinAgentTools, DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
-import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
+import {
+  DEFAULT_DEPLOYMENT_PROVIDER,
+  DEFAULT_OPENROUTER_MODEL_ID,
+  OPENCODE_GO_PROVIDER_ID,
+  resolveDeploymentModel,
+} from "./deployment-model.js";
 import { PiRuntimeCredentialStore, toOAuthCredential } from "./pi-credentials.js";
 import { registerLocalProvider } from "./pi-local-provider.js";
 import {
@@ -36,6 +41,7 @@ import {
   registerOpenAiCompatibleCatalog,
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
+import { registerOpenCodeGoCatalog } from "./pi-opencode-go-models.js";
 import {
   PiJsonlSessionRecorder,
   type PiSessionHandle,
@@ -49,7 +55,9 @@ const running = new Map<string, { controller: AbortController; work: Promise<voi
 // would run before .env is loaded and miss the local provider entirely.
 let catalogModelsCache: Models | undefined;
 function catalogModels(): Models {
-  catalogModelsCache ??= registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels()));
+  catalogModelsCache ??= registerOpenCodeGoCatalog(
+    registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels())),
+  );
   return catalogModelsCache;
 }
 const MAX_PARALLEL_SUBAGENTS = 4;
@@ -61,10 +69,10 @@ const SILENT_TOOL_CONTINUATION_PROMPT =
   "Continue the original task from the latest tool result. Do not stop after a tool call; use any remaining tools needed, then give the user the final answer.";
 const TOOL_FINAL_RESPONSE_FALLBACK =
   "I completed the tool step but could not produce a final response. Please ask me to continue.";
-// Reasoning-capable models must not start at "off": for OpenRouter, pi-ai maps
-// that to reasoning.effort "none", which 400s on endpoints that mandate
-// reasoning (e.g. google/gemini-3.7-flash). Keep a real level when model.reasoning
-// is set; plain models stay off.
+// Reasoning-capable models must not start at "off": pi-ai maps that to
+// reasoning.effort "none", which 400s on endpoints that mandate reasoning
+// (including some OpenRouter and OpenCode Go models). Keep a real level when
+// model.reasoning is set; plain models stay off.
 const REASONING_MODEL_THINKING_LEVEL: ModelThinkingLevel = "medium";
 function thinkingLevelFor(
   model: Model<Api>,
@@ -463,12 +471,13 @@ function resolveRuntimeModel(modelConfig: AgentRunRequest["model"]): {
   model: Model<Api> | undefined;
   apiKey: string | undefined;
 } {
-  const provider = modelConfig.provider === "scripted" ? "openrouter" : modelConfig.provider;
+  const deployment = resolveDeploymentModel();
+  const provider = modelConfig.provider === "scripted" ? deployment.provider : modelConfig.provider;
   const envDefaultModel = process.env.PI_DEFAULT_MODEL?.trim();
-  const envDefaultProvider = process.env.PI_DEFAULT_PROVIDER?.trim() || "openrouter";
+  const envDefaultProvider = process.env.PI_DEFAULT_PROVIDER?.trim() || DEFAULT_DEPLOYMENT_PROVIDER;
   const modelId =
     modelConfig.id === "scripted"
-      ? envDefaultModel || DEFAULT_OPENROUTER_MODEL_ID
+      ? envDefaultModel || deployment.model || DEFAULT_OPENROUTER_MODEL_ID
       : modelConfig.id.trim();
   const models = modelsForRequest({ model: modelConfig }, provider);
   let model = models.getModel(provider, modelId);
@@ -487,10 +496,13 @@ function resolveRuntimeModel(modelConfig: AgentRunRequest["model"]): {
     ? undefined
     : modelConfig.provider === OPENAI_COMPATIBLE_PROVIDER_ID
       ? modelConfig.apiKey || "local"
-      : // Only OpenRouter may fall back to the OpenRouter env key. Handing it to
-        // another provider would ship our key to a vendor it was not issued for.
+      : // Provider-specific env keys must never cross vendor boundaries.
         (modelConfig.apiKey ??
-        (provider === "openrouter" ? process.env.OPENROUTER_API_KEY : undefined));
+        (provider === "openrouter"
+          ? process.env.OPENROUTER_API_KEY
+          : provider === OPENCODE_GO_PROVIDER_ID
+            ? process.env.OPENCODE_API_KEY
+            : undefined));
   return { provider, modelId, models, model, apiKey };
 }
 
@@ -501,15 +513,17 @@ export function modelsForRequest(
   const oauth = request.model.oauth;
   if (oauth) {
     const persist = oauth.persist;
-    return registerOpenAiCompatibleCatalog(
-      registerLocalProvider(
-        builtinModels({
-          credentials: new PiRuntimeCredentialStore(
-            provider,
-            toOAuthCredential(oauth.credential),
-            persist ? (next) => persist(next) : undefined,
-          ),
-        }),
+    return registerOpenCodeGoCatalog(
+      registerOpenAiCompatibleCatalog(
+        registerLocalProvider(
+          builtinModels({
+            credentials: new PiRuntimeCredentialStore(
+              provider,
+              toOAuthCredential(oauth.credential),
+              persist ? (next) => persist(next) : undefined,
+            ),
+          }),
+        ),
       ),
     );
   }
@@ -518,7 +532,9 @@ export function modelsForRequest(
     request.model.baseUrl &&
     request.model.id.trim()
   ) {
-    const models = registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels()));
+    const models = registerOpenCodeGoCatalog(
+      registerOpenAiCompatibleCatalog(registerLocalProvider(builtinModels())),
+    );
     return registerOpenAiCompatibleRuntime(models, {
       modelId: request.model.id,
       baseUrl: request.model.baseUrl,
