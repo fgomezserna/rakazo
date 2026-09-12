@@ -212,6 +212,41 @@ describe("lingui catalogs", () => {
     expect(i18n._({ id: "Cancel", message: "Cancel" })).toBe("Cancelar");
   });
 
+  it("ships the workspace and shared-bot chrome instead of leaking Lingui ids", () => {
+    const catalog = readFileSync(
+      fileURLToPath(new URL("../locales/es/messages.po", import.meta.url)),
+      "utf8",
+    );
+    const messages = [
+      ["Share with workspaces", "Compartir con espacios de trabajo"],
+      [
+        "Shared bots keep their own memory, credentials, and execution.",
+        "Los bots compartidos conservan su propia memoria, credenciales y ejecución.",
+      ],
+      ["Choose a workspace", "Elige un espacio de trabajo"],
+      ["Share", "Compartir"],
+      ["Configure workspace", "Configurar espacio de trabajo"],
+      [
+        "Choose the name and avatar your team will see in the sidebar.",
+        "Elige el nombre y el avatar que tu equipo verá en la barra lateral.",
+      ],
+      ["Avatar", "Avatar"],
+      ["Choose image", "Elegir imagen"],
+      [
+        "PNG, JPEG, WebP, or GIF. The image is resized to a small team avatar.",
+        "PNG, JPEG, WebP o GIF. La imagen se redimensiona a un avatar pequeño del equipo.",
+      ],
+      ["Save workspace", "Guardar espacio de trabajo"],
+    ] as const;
+
+    for (const [source, expected] of messages) {
+      const block = catalog
+        .split("\n\n")
+        .find((entry) => entry.includes(`msgid ${JSON.stringify(source)}`));
+      expect(block, source).toContain(`msgstr ${JSON.stringify(expected)}`);
+    }
+  });
+
   it("ships the Russian runtime catalog with translated chrome and Russian plurals", () => {
     const catalog = readFileSync(
       fileURLToPath(new URL("../locales/ru/messages.po", import.meta.url)),
