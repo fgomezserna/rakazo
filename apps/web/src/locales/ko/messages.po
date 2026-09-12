@@ -3755,3 +3755,9 @@ msgstr ""
 #: apps/web/src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Recall and write"
 msgstr ""
+
+msgid "Share with workspaces"
+msgstr "워크스페이스와 공유"
+
+msgid "Shared bots keep their own memory, credentials, and execution."
+msgstr "공유된 봇은 자체 메모리, 자격 증명 및 실행 환경을 유지합니다."

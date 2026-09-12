@@ -3755,3 +3755,9 @@ msgstr "Recall only"
 #: apps/web/src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Recall and write"
 msgstr "Recall and write"
+
+msgid "Share with workspaces"
+msgstr "Share with workspaces"
+
+msgid "Shared bots keep their own memory, credentials, and execution."
+msgstr "Shared bots keep their own memory, credentials, and execution."
