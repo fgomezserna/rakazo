@@ -20,6 +20,7 @@ describe("toolRequiresApproval", () => {
     expect(toolRequiresApproval("destination.write", true)).toBe(true);
     expect(toolRequiresApproval("secret_request", false)).toBe(true);
     expect(toolRequiresApproval("delegate_secret", false)).toBe(true);
+    expect(toolRequiresApproval("capture_secret_from_clipboard", false)).toBe(true);
     expect(toolRequiresApproval("forget_secret", false)).toBe(true);
     expect(toolRequiresApproval("forget_memory", false)).toBe(true);
     expect(toolRequiresApproval("list_secrets", false)).toBe(false);
@@ -29,6 +30,7 @@ describe("toolRequiresApproval", () => {
     expect(toolRequiresApproval("create_space", false)).toBe(true);
     expect(toolRequiresExplicitApproval("create_space")).toBe(true);
     expect(toolRequiresExplicitApproval("delegate_secret")).toBe(true);
+    expect(toolRequiresExplicitApproval("capture_secret_from_clipboard")).toBe(true);
     expect(toolRequiresExplicitApproval("archive_bot")).toBe(false);
   });
 

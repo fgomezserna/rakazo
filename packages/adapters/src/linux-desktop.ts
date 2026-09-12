@@ -3,11 +3,13 @@ import type {
   AdapterContext,
   ComputerAction,
   ComputerActionRequest,
+  ComputerClipboard,
   ComputerInput,
   ComputerRef,
   ScreenRequest,
   ScreenSession,
 } from "@rakazo/adapter-kit";
+import { COMPUTER_CLIPBOARD_MAX_BYTES } from "@rakazo/adapter-kit";
 import {
   BROWSER_APPLICATIONS,
   browserLauncherPath,
@@ -132,6 +134,22 @@ export class LinuxDesktop {
     return this.observeLayout(computer, layout, context);
   }
 
+  /**
+   * Consume plain text from the current X11 screen and clear it before
+   * returning. The token is never written to a log or a command argument.
+   */
+  async consumeClipboard(
+    computer: ComputerRef,
+    context: AdapterContext,
+  ): Promise<ComputerClipboard> {
+    const { layout } = await this.ensure(computer, context);
+    const text = await this.run(computer, consumeClipboardCommand(layout.display), context);
+    if (Buffer.byteLength(text, "utf8") > COMPUTER_CLIPBOARD_MAX_BYTES) {
+      throw new Error(`computer clipboard exceeds ${COMPUTER_CLIPBOARD_MAX_BYTES} bytes`);
+    }
+    return { text };
+  }
+
   private async observeLayout(
     computer: ComputerRef,
     layout: { display: string; displayNumber: number },
@@ -214,7 +232,7 @@ export const PREPARE_LINUX_DESKTOP = [
   "set -eu",
   'missing=""',
   // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion
-  'for pair in python3:python3 flock:util-linux Xvfb:xvfb xdpyinfo:x11-utils x11vnc:x11vnc fluxbox:fluxbox xdotool:xdotool scrot:scrot; do command -v "${pair%%:*}" >/dev/null 2>&1 || missing="$missing ${pair#*:}"; done',
+  'for pair in python3:python3 flock:util-linux Xvfb:xvfb xdpyinfo:x11-utils x11vnc:x11vnc fluxbox:fluxbox xdotool:xdotool xsel:xsel scrot:scrot; do command -v "${pair%%:*}" >/dev/null 2>&1 || missing="$missing ${pair#*:}"; done',
   'if ! command -v websockify >/dev/null 2>&1 && [ ! -x /opt/noVNC/utils/websockify/run ]; then missing="$missing websockify"; fi',
   'if [ ! -d /usr/share/novnc ] && [ ! -d /opt/noVNC ]; then missing="$missing novnc"; fi',
   'if [ -n "$missing" ]; then',
@@ -222,3 +240,24 @@ export const PREPARE_LINUX_DESKTOP = [
   "  $root apt-get update -qq && $root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing",
   "fi",
 ].join("\n");
+
+/** Read at most one bounded clipboard payload, clear it, then release the bytes. */
+export function consumeClipboardCommand(display: string): string {
+  const maxBytes = COMPUTER_CLIPBOARD_MAX_BYTES;
+  return [
+    "set -eu",
+    `export DISPLAY=${shellQuote(display)}`,
+    'tmp="$(mktemp)"',
+    'clear_clipboard() { xsel --clipboard --clear >/dev/null 2>&1 || true; rm -f "$tmp"; }',
+    "trap clear_clipboard EXIT",
+    `xsel --clipboard --output 2>/dev/null | head -c ${maxBytes + 1} >"$tmp"`,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: generated shell parameter expansion
+    'statuses=("${PIPESTATUS[@]}")',
+    'bytes="$(wc -c <"$tmp")"',
+    `if [ "$bytes" -gt ${maxBytes} ]; then echo "computer clipboard exceeds ${maxBytes} bytes" >&2; exit 75; fi`,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: generated shell parameter expansion
+    'if [ "${statuses[0]}" -ne 0 ]; then echo "clipboard unavailable" >&2; exit 1; fi',
+    "xsel --clipboard --clear",
+    'cat "$tmp"',
+  ].join("; ");
+}

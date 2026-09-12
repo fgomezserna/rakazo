@@ -205,6 +205,7 @@ describe("host clipboard paste bridge", () => {
     const start = readFileSync(path.join(root, "start.sh"), "utf8");
     const supervisor = readFileSync(path.join(import.meta.dirname, "index.ts"), "utf8");
     expect(dockerfile).toMatch(/clipboard-bridge\.js/);
+    expect(dockerfile).toMatch(/\bxsel\b/);
     expect(dockerfile).toMatch(/novnc-bundle/);
     expect(dockerfile).toMatch(/rakazo-novnc\.bundle\.js/);
     expect(entry).toMatch(/attachHostClipboardPaste/);

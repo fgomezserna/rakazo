@@ -99,4 +99,26 @@ describe("buildApprovalAskBlock", () => {
       text: "Review before transferring “crm_api” from bot bot-crm",
     });
   });
+
+  it("makes clipboard capture explicit without including the value", () => {
+    const block = buildApprovalAskBlock(
+      "effect-1",
+      "capture_secret_from_clipboard",
+      {
+        credential: {
+          name: "vanguard_api_key",
+          origin: "https://api.example.test",
+          auth: { type: "bearer" },
+        },
+      },
+      ["token-secret"],
+    );
+
+    expect(block).toMatchObject({
+      kind: "ask",
+      text: "Review before capturing “vanguard_api_key” from this bot's computer clipboard",
+      detail: expect.stringContaining("source: this bot's computer clipboard"),
+    });
+    expect(JSON.stringify(block)).not.toContain("token-secret");
+  });
 });

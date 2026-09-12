@@ -9,10 +9,20 @@ import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
 import { catalogEntries, resolveCatalogCall } from "./lazy-tool-catalog.js";
 
+const lifecycleMocks = vi.hoisted(() => ({
+  acquireComputerExecutionLease: vi.fn(async () => null),
+  holdComputerExecutionLeaseForTakeover: vi.fn(async () => true),
+  provisionComputer: vi.fn(async () => ({
+    id: "computer-1",
+    botId: "bot-1",
+    kind: "e2b" as const,
+    providerRef: "computer-1",
+  })),
+}));
+
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
-  acquireComputerExecutionLease: async () => null,
-  provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
+  ...lifecycleMocks,
 }));
 
 vi.mock("./auto-review.js", async (importOriginal) => ({
@@ -38,6 +48,7 @@ function fixture({
   rules = [] as ActionApprovalRule[],
   autoReview = false,
   trigger = "user",
+  capture = false,
 } = {}) {
   const tool: ConnectorTool = {
     name,
@@ -131,9 +142,11 @@ function fixture({
     agentSecret: { findMany: vi.fn(async () => []) },
     agentSkill: { findMany: vi.fn(async () => []) },
     scratchpadItem: { findMany: vi.fn(async () => []) },
+    botSecret: { findFirst: vi.fn(async () => null) },
     actionApprovalRule: { findMany: vi.fn(async () => rules) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: autoReview })) },
     externalEffect,
+    $transaction: vi.fn(),
   };
   const pauseRunForInput = vi.fn(async () => {
     run.status = "waiting_input";
@@ -143,7 +156,8 @@ function fixture({
   const execute = vi.fn(async function* (call: ConnectorCall) {
     yield { type: "result" as const, data: { item: call.args.id } };
   });
-  let calls = [{ args: { id: "item-1" }, executionId: "call-1" }];
+  type RuntimeCall = { args: Record<string, unknown>; executionId: string };
+  let calls: RuntimeCall[] = [{ args: { id: "item-1" }, executionId: "call-1" }];
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
     for (const call of calls) {
       const result = await request.executeTool!(
@@ -156,6 +170,22 @@ function fixture({
     }
     yield { type: "done" as const, text: "Done" };
   });
+  const consumeClipboard = vi.fn(async () => ({ text: "clipboard-token" }));
+  const releaseScreen = vi.fn(async () => undefined);
+  const secretStore = {
+    put: vi.fn(async () => ({ ciphertext: "encrypted-clipboard-token" })),
+  };
+  prisma.$transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+    callback({
+      $queryRaw: vi.fn(async () => []),
+      botSecret: {
+        findFirst: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => undefined),
+        update: vi.fn(async () => undefined),
+      },
+    }),
+  );
   const executor = createRunExecutor({
     prisma,
     runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
@@ -175,19 +205,26 @@ function fixture({
         catalog ? resolveCatalogCall(call, catalogEntries([tool])) : undefined,
       execute,
     },
-    sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
+    sandbox: {
+      describe: () => ({ capabilities: { graphical: capture } }),
+      consumeClipboard,
+      releaseScreen,
+    },
     memory: { read: async () => ({ documents: [] }) },
     memoryProviders: { resolve: async () => null },
     events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
+    secretStore,
   } as unknown as Parameters<typeof createRunExecutor>[0]);
   return {
     effects,
     results,
     execute,
     pauseRunForInput,
-    setCalls(next: typeof calls) {
+    consumeClipboard,
+    releaseScreen,
+    setCalls(next: RuntimeCall[]) {
       calls = next;
     },
     async run() {
@@ -203,6 +240,9 @@ function fixture({
 describe("connector read-only metadata and approval enforcement", () => {
   beforeEach(() => {
     vi.mocked(runAutoReviewJudge).mockReset();
+    lifecycleMocks.acquireComputerExecutionLease.mockClear();
+    lifecycleMocks.holdComputerExecutionLeaseForTakeover.mockClear();
+    lifecycleMocks.provisionComputer.mockClear();
   });
 
   it.each(["shell", "write_file"])(
@@ -364,5 +404,44 @@ describe("connector read-only metadata and approval enforcement", () => {
         expect(f.pauseRunForInput).toHaveBeenCalledTimes(decision === "pass" ? 0 : 1);
       },
     );
+  });
+
+  it("keeps the copied token's computer alive until clipboard capture is approved", async () => {
+    const f = fixture({ capture: true, name: "capture_secret_from_clipboard" });
+    const args = {
+      credential: {
+        name: "vanguard_api_key",
+        origin: "https://api.example.test",
+        auth: { type: "bearer" },
+      },
+    };
+    f.setCalls([{ args, executionId: "capture-1" }]);
+
+    await f.run();
+
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(lifecycleMocks.holdComputerExecutionLeaseForTakeover).toHaveBeenCalledOnce();
+    expect(f.consumeClipboard).not.toHaveBeenCalled();
+    expect(f.releaseScreen).not.toHaveBeenCalled();
+    expect(lifecycleMocks.acquireComputerExecutionLease).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ resumeHeldLease: true }),
+    );
+
+    f.effects[0]!.status = "approved";
+    f.setCalls([{ args, executionId: "capture-2" }]);
+    await f.run();
+
+    expect(f.consumeClipboard).toHaveBeenCalledOnce();
+    expect(f.results.at(-1)).toEqual({
+      saved: true,
+      name: "vanguard_api_key",
+      origin: "https://api.example.test",
+      auth: { type: "bearer" },
+      source: "computer_clipboard",
+    });
+    expect(JSON.stringify(f.results)).not.toContain("clipboard-token");
+    expect(JSON.stringify(f.effects)).not.toContain("clipboard-token");
+    expect(f.releaseScreen).toHaveBeenCalledOnce();
   });
 });

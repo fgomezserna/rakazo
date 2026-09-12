@@ -4,6 +4,8 @@ import net from "node:net";
 import { resolveSupervisorToken } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
+  consumeClipboardCommand,
+  MAX_COMPUTER_CLIPBOARD_BYTES,
   MAX_SUPERVISOR_FILE_REQUEST_BYTES,
   MAX_SUPERVISOR_REQUEST_BYTES,
   resolveDockerSocketPath,
@@ -143,6 +145,7 @@ describe("sandbox supervisor HTTP boundary", () => {
       ["POST", "/computers/id/exec"],
       ["POST", "/computers/id/observe"],
       ["POST", "/computers/id/actions"],
+      ["POST", "/computers/id/clipboard"],
       ["POST", "/computers/id/browser"],
       ["GET", "/computers/id/files"],
       ["POST", "/computers/id/files"],
@@ -233,6 +236,20 @@ describe("sandbox supervisor HTTP boundary", () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "computer identity mismatch" });
+  });
+});
+
+describe("sandbox supervisor clipboard boundary", () => {
+  it("builds a bounded one-shot X11 clipboard command", () => {
+    const command = consumeClipboardCommand(":3");
+    expect(command).toContain("DISPLAY=':3'");
+    expect(command).toContain("xsel --clipboard --output");
+    expect(command).toContain(`head -c ${MAX_COMPUTER_CLIPBOARD_BYTES + 1}`);
+    expect(command).toContain("xsel --clipboard --clear");
+    expect(command).toContain("trap clear_clipboard EXIT");
+    expect(command).toContain(`-gt ${MAX_COMPUTER_CLIPBOARD_BYTES}`);
+    expect(command.lastIndexOf("--clear")).toBeLessThan(command.indexOf('cat "$tmp"'));
+    expect(spawnSync("bash", ["-n"], { input: command }).status).toBe(0);
   });
 });
 

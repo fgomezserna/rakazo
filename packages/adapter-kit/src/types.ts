@@ -129,6 +129,18 @@ export interface ComputerActionResult {
   observation?: ComputerObservation;
 }
 
+/**
+ * A one-shot desktop clipboard payload. Providers must clear the source
+ * clipboard before returning this value; callers must persist it directly and
+ * never include it in model input, chat, logs, files, or shell command arguments.
+ */
+export interface ComputerClipboard {
+  text: string;
+}
+
+/** Maximum UTF-8 bytes a provider may consume from a desktop clipboard. */
+export const COMPUTER_CLIPBOARD_MAX_BYTES = 16 * 1024;
+
 export interface ComputerFileEntry {
   path: string;
   kind: "file" | "dir";

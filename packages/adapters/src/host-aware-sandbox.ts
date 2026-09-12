@@ -49,6 +49,7 @@ export function createRunSandbox(
 
 export class HostAwareSandbox implements SandboxProvider {
   readonly pageBrowser?: SandboxProvider["pageBrowser"];
+  readonly consumeClipboard?: SandboxProvider["consumeClipboard"];
 
   constructor(
     private readonly isolated: SandboxProvider,
@@ -66,6 +67,14 @@ export class HostAwareSandbox implements SandboxProvider {
               fallback: "computer_act",
               error: "Page browser is unavailable on this computer.",
             });
+      };
+    }
+    if (isolated.consumeClipboard || host.consumeClipboard) {
+      this.consumeClipboard = (computer, context) => {
+        const provider = this.route(computer);
+        return provider.consumeClipboard
+          ? provider.consumeClipboard(computer, context)
+          : Promise.reject(new Error("Clipboard consumption is unavailable on this computer."));
       };
     }
   }

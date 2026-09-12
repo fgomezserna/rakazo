@@ -63,6 +63,14 @@ function describeApprovalAction(toolName: string, args: Record<string, unknown>)
       ? `transferring ${credential} to bot ${String(target)}`
       : `transferring ${credential} to another bot`;
   }
+  if (toolName === "capture_secret_from_clipboard") {
+    const credential =
+      args.credential && typeof args.credential === "object"
+        ? (args.credential as Record<string, unknown>)
+        : undefined;
+    const name = credential?.name ? `“${String(credential.name)}”` : "a credential";
+    return `capturing ${name} from this bot's computer clipboard`;
+  }
   const target = pickScopeLabel(args);
   return target ? `${toolName} → ${target}` : toolName;
 }
@@ -80,6 +88,15 @@ function formatApprovalDetail(
     lines.push(
       "Bots, groups, chats, files, memory, and integrations in this space stay separate from other spaces.",
     );
+  }
+  if (toolName === "capture_secret_from_clipboard") {
+    const credential =
+      args.credential && typeof args.credential === "object"
+        ? (args.credential as Record<string, unknown>)
+        : undefined;
+    if (credential?.name) lines.push(`credential: ${String(credential.name)}`);
+    if (credential?.origin) lines.push(`origin: ${String(credential.origin)}`);
+    lines.push("source: this bot's computer clipboard (the value will not be shown)");
   }
   for (const key of ["collection", "title", "to", "subject", "amount", "body"]) {
     const value = args[key];

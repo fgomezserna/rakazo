@@ -165,4 +165,23 @@ describe("host-aware sandbox", () => {
     ]);
     await sandbox.destroy(computer, ctx);
   });
+
+  it("forwards one-shot clipboard consumption to the routed provider", async () => {
+    const isolated: SandboxProvider = new FakeSandboxProvider();
+    const consumeClipboard = vi.fn(async () => ({ text: "clipboard-token" }));
+    isolated.consumeClipboard = consumeClipboard;
+    const host = new DesktopSandboxProvider();
+    const sandbox = new HostAwareSandbox(isolated, host, async () => false);
+    const computer = await sandbox.provision(
+      { botId: "clipboard", homePath: "/tmp/clipboard" },
+      ctx,
+    );
+
+    expect(typeof sandbox.consumeClipboard).toBe("function");
+    await expect(sandbox.consumeClipboard!(computer, ctx)).resolves.toEqual({
+      text: "clipboard-token",
+    });
+    expect(consumeClipboard).toHaveBeenCalledWith(computer, ctx);
+    await sandbox.destroy(computer, ctx);
+  });
 });

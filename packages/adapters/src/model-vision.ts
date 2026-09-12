@@ -14,6 +14,9 @@ export const IMAGE_RETURNING_COMPUTER_TOOLS = new Set([
   "computer_act",
   "open_path",
   "launch_app",
+  // Clipboard capture acts on the model-visible computer and must not be
+  // exposed to a text-only model that cannot verify which token is copied.
+  "capture_secret_from_clipboard",
 ]);
 
 export const MODEL_CANNOT_SEE_MESSAGE = "This bot's model cannot see; pick a vision-capable model.";

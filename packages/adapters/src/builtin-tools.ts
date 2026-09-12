@@ -15,6 +15,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "handoff_to_bot",
   "message_bot",
   "delegate_secret",
+  "capture_secret_from_clipboard",
 ]);
 
 const scheduleCreateProperties = {
@@ -334,6 +335,23 @@ export const builtinAgentTools: ConnectorTool[] = [
           additionalProperties: false,
         },
       ],
+    },
+  },
+  {
+    name: "capture_secret_from_clipboard",
+    description:
+      "Consume a credential copied to this bot's computer clipboard and save it as a named API credential. Use only after the user explicitly asked for this, the correct token is visible in the bot computer, and the copy action has completed. The action always requires user approval; the backend stores the value encrypted and returns only metadata, never the token. Do not ask the user to type or paste the token into chat, and do not use shell or file tools to read the clipboard.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        credential: z.toJSONSchema(BotSecretDestination),
+        replace: {
+          type: "boolean",
+          description: "Replace an existing credential only after the user explicitly confirms.",
+        },
+      },
+      required: ["credential"],
+      additionalProperties: false,
     },
   },
   {

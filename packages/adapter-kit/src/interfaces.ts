@@ -22,6 +22,7 @@ import type {
   CommandRequest,
   ComputerActionRequest,
   ComputerActionResult,
+  ComputerClipboard,
   ComputerFileEntry,
   ComputerInput,
   ComputerObservation,
@@ -129,6 +130,8 @@ export interface SandboxProvider {
     request: ComputerActionRequest,
     context: AdapterContext,
   ): Promise<ComputerActionResult>;
+  /** Consume the current desktop clipboard without exposing it to an agent model. */
+  consumeClipboard?(computer: ComputerRef, context: AdapterContext): Promise<ComputerClipboard>;
   listFiles(
     computer: ComputerRef,
     path: string,

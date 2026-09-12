@@ -1,4 +1,5 @@
 import type { ProcessEvent } from "@rakazo/adapter-kit";
+import { COMPUTER_CLIPBOARD_MAX_BYTES } from "@rakazo/adapter-kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DockerSandboxProvider,
@@ -61,6 +62,61 @@ describe("Docker sandbox", () => {
       "x-request-id": expect.any(String),
       traceparent: expect.stringMatching(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/),
     });
+  });
+
+  it("consumes the supervisor clipboard without putting the token in a request body", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      Response.json({ text: "clipboard-token" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new DockerSandboxProvider("http://supervisor.test", "test-token");
+    const computer = {
+      id: "computer",
+      botId: "bot",
+      kind: "docker" as const,
+      providerRef: "computer",
+    };
+
+    await expect(provider.consumeClipboard(computer, context)).resolves.toEqual({
+      text: "clipboard-token",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://supervisor.test/computers/computer/clipboard",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer test-token",
+          "x-rakazo-bot-id": "bot",
+          "x-rakazo-screen-id": "bot",
+          "x-rakazo-screen-lease-id": "run-1:1",
+          "x-rakazo-space-id": "workspace",
+        }),
+        signal: context.signal,
+      }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+  });
+
+  it("rejects malformed or oversized clipboard responses", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ value: "not-text" }))
+      .mockResolvedValueOnce(Response.json({ text: "x".repeat(COMPUTER_CLIPBOARD_MAX_BYTES + 1) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new DockerSandboxProvider("http://supervisor.test", "test-token");
+    const computer = {
+      id: "computer",
+      botId: "bot",
+      kind: "docker" as const,
+      providerRef: "computer",
+    };
+
+    await expect(provider.consumeClipboard(computer, context)).rejects.toThrow(
+      "sandbox clipboard returned invalid text",
+    );
+    await expect(provider.consumeClipboard(computer, context)).rejects.toThrow(
+      `sandbox clipboard exceeds ${COMPUTER_CLIPBOARD_MAX_BYTES} bytes`,
+    );
   });
 
   it("rejects a declared oversized success response without buffering it", async () => {

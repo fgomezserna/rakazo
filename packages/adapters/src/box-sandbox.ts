@@ -314,6 +314,9 @@ export class BoxSandboxProvider implements SandboxProvider {
   async observe(computer: ComputerRef, context: AdapterContext): Promise<ComputerObservation> {
     return this.desktops.observe(computer, context);
   }
+  async consumeClipboard(computer: ComputerRef, context: AdapterContext) {
+    return this.desktops.consumeClipboard(computer, context);
+  }
   async act(computer: ComputerRef, request: ComputerActionRequest, context: AdapterContext) {
     return this.desktops.act(computer, request, context);
   }

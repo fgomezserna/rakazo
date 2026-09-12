@@ -5,11 +5,13 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
+import { COMPUTER_CLIPBOARD_MAX_BYTES } from "@rakazo/adapter-kit";
 import {
   boundedSandboxCommandTimeoutMs,
   readBoundedJsonResponse,
   resolveSupervisorToken,
 } from "@rakazo/core";
+import { shellQuote } from "@rakazo/core/node/desktop-runtime";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
@@ -101,6 +103,7 @@ const computerScreens = new Map<string, Map<string, ScreenAssignment>>();
 
 export const MAX_SUPERVISOR_REQUEST_BYTES = 1024 * 1024;
 export const MAX_SUPERVISOR_FILE_REQUEST_BYTES = 16 * 1024 * 1024 + 64 * 1024;
+export const MAX_COMPUTER_CLIPBOARD_BYTES = COMPUTER_CLIPBOARD_MAX_BYTES;
 
 /** Keep normal control requests small while allowing the existing 16 MiB file payload. */
 export function supervisorRequestBodyLimit(method: string, pathname: string): number {
@@ -470,6 +473,37 @@ app.post("/computers/:id/actions", async (c) => {
               controlResult?.observation ?? (await observeContainer(container, layout.display)),
           }),
     });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 500);
+  }
+});
+
+app.post("/computers/:id/clipboard", async (c) => {
+  try {
+    const { container, layout } = await managedScreen(
+      c.req.param("id"),
+      c.req.header("x-rakazo-bot-id"),
+      c.req.header("x-rakazo-space-id"),
+      c.req.header("x-rakazo-screen-id"),
+      c.req.header("x-rakazo-screen-lease-id"),
+    );
+    const result = await runContainerCommand(
+      container,
+      ["bash", "-lc", consumeClipboardCommand(layout.display)],
+      { timeoutMs: 5_000 },
+    );
+    if (result.code !== 0) {
+      const status = /clipboard exceeds/i.test(result.stderr) ? 413 : 502;
+      return c.json({ error: result.stderr || "clipboard unavailable" }, status);
+    }
+    if (Buffer.byteLength(result.stdout, "utf8") > MAX_COMPUTER_CLIPBOARD_BYTES) {
+      return c.json(
+        { error: `computer clipboard exceeds ${MAX_COMPUTER_CLIPBOARD_BYTES} bytes` },
+        413,
+      );
+    }
+    return c.json({ text: result.stdout });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return c.json({ error: message }, 500);
@@ -971,6 +1005,26 @@ function computerControlEndpoint(info: Docker.ContainerInspectInfo) {
 }
 
 export const MAX_COMPUTER_CONTROL_RESPONSE_BYTES = 16 * 1024 * 1024;
+
+/** Read, bound, and clear the current X11 clipboard before releasing its value. */
+export function consumeClipboardCommand(display: string): string {
+  return [
+    "set -eu",
+    `export DISPLAY=${shellQuote(display)}`,
+    'tmp="$(mktemp)"',
+    'clear_clipboard() { xsel --clipboard --clear >/dev/null 2>&1 || true; rm -f "$tmp"; }',
+    "trap clear_clipboard EXIT",
+    `xsel --clipboard --output 2>/dev/null | head -c ${MAX_COMPUTER_CLIPBOARD_BYTES + 1} >"$tmp"`,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: generated shell parameter expansion
+    'statuses=("${PIPESTATUS[@]}")',
+    'bytes="$(wc -c <"$tmp")"',
+    `if [ "$bytes" -gt ${MAX_COMPUTER_CLIPBOARD_BYTES} ]; then echo "computer clipboard exceeds ${MAX_COMPUTER_CLIPBOARD_BYTES} bytes" >&2; exit 75; fi`,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: generated shell parameter expansion
+    'if [ "${statuses[0]}" -ne 0 ]; then echo "clipboard unavailable" >&2; exit 1; fi',
+    "xsel --clipboard --clear",
+    'cat "$tmp"',
+  ].join("; ");
+}
 
 export async function controlDesktop(
   endpoint: { url: string; token: string },

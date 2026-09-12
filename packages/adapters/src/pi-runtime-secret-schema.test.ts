@@ -26,6 +26,10 @@ function requestSecretSchema() {
   return toolNamed("request_secret").inputSchema as Record<string, unknown>;
 }
 
+function clipboardCaptureSchema() {
+  return toolNamed("capture_secret_from_clipboard").inputSchema as Record<string, unknown>;
+}
+
 function oneOfBranches(schema: Record<string, unknown>) {
   const branches = Array.isArray(schema.oneOf) ? schema.oneOf : [];
   return branches as Array<{
@@ -162,6 +166,28 @@ describe("prepareRequestSecretArguments", () => {
       label: "c",
       purpose: "otp",
     });
+  });
+});
+
+describe("capture_secret_from_clipboard parameters", () => {
+  it("exposes a closed credential destination at the model boundary", () => {
+    const converted = jsonSchemaParameters(clipboardCaptureSchema()) as {
+      type?: unknown;
+      properties?: Record<string, { type?: unknown; properties?: Record<string, unknown> }>;
+      required?: string[];
+      additionalProperties?: unknown;
+    };
+    expect(converted.type).toBe("object");
+    expect(converted.required).toEqual(["credential"]);
+    expect(converted.additionalProperties).toBe(false);
+    expect(converted.properties?.credential?.type).toBe("object");
+    expect(converted.properties?.credential?.properties).toEqual(
+      expect.objectContaining({
+        name: expect.anything(),
+        origin: expect.anything(),
+        auth: expect.anything(),
+      }),
+    );
   });
 });
 

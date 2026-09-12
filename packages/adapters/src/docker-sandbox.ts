@@ -3,6 +3,7 @@ import type {
   AdapterContext,
   CommandRequest,
   ComputerActionRequest,
+  ComputerClipboard,
   ComputerFileEntry,
   ComputerInput,
   ComputerObservation,
@@ -16,6 +17,7 @@ import type {
   ScreenRequest,
   ScreenSession,
 } from "@rakazo/adapter-kit";
+import { COMPUTER_CLIPBOARD_MAX_BYTES } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@rakazo/core";
 import { outgoingCorrelationHeaders } from "@rakazo/logging";
 import {
@@ -28,6 +30,8 @@ import { readBodyCapped, withAbort } from "./web-ssrf.js";
 
 export const MAX_SANDBOX_ERROR_RESPONSE_BYTES = 8 * 1024;
 export const MAX_SANDBOX_SUCCESS_RESPONSE_BYTES = 16 * 1024 * 1024;
+/** JSON escaping can expand control characters beyond the raw clipboard bound. */
+export const MAX_SANDBOX_CLIPBOARD_RESPONSE_BYTES = COMPUTER_CLIPBOARD_MAX_BYTES * 6 + 1024;
 export const SCREEN_RELEASE_TIMEOUT_MS = 8_000;
 const SANDBOX_ERROR_RESPONSE_TIMEOUT_MS = 1_000;
 const SANDBOX_SUCCESS_RESPONSE_TIMEOUT_MS = 30_000;
@@ -355,6 +359,31 @@ export class DockerSandboxProvider implements SandboxProvider {
           }
         : {}),
     };
+  }
+
+  async consumeClipboard(
+    computer: ComputerRef,
+    context: AdapterContext,
+  ): Promise<ComputerClipboard> {
+    const res = await fetch(this.url(`/computers/${computer.id}/clipboard`), {
+      method: "POST",
+      headers: this.headers(context, computer.botId),
+      signal: context.signal,
+    });
+    if (!res.ok) {
+      const detail = await safeBody(res, context.signal);
+      throw new Error(`sandbox clipboard failed: ${res.status} ${detail}`.trim());
+    }
+    const body = await readSandboxJson<{ text?: unknown }>(
+      res,
+      context.signal,
+      MAX_SANDBOX_CLIPBOARD_RESPONSE_BYTES,
+    );
+    if (typeof body.text !== "string") throw new Error("sandbox clipboard returned invalid text");
+    if (Buffer.byteLength(body.text, "utf8") > COMPUTER_CLIPBOARD_MAX_BYTES) {
+      throw new Error(`sandbox clipboard exceeds ${COMPUTER_CLIPBOARD_MAX_BYTES} bytes`);
+    }
+    return { text: body.text };
   }
 
   async listFiles(
