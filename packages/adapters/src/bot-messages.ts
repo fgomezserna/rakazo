@@ -12,6 +12,7 @@ import {
 import {
   appendEventInTransaction,
   createThreadMessageInTransaction,
+  listSharedBotsForSpace,
   type PrismaClient,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -93,10 +94,23 @@ export async function messageBot(
   const intent = input.intent ?? "request";
   const hop = nextBotMessageHop(sourceContext?.hop);
 
-  const candidates = await deps.prisma.bot.findMany({
-    where: { spaceId: run.spaceId, userId: run.userId, archivedAt: null },
-    select: { id: true, name: true, title: true, thread: { select: { id: true } } },
-  });
+  const [localCandidates, sharedCandidates] = await Promise.all([
+    deps.prisma.bot.findMany({
+      where: { spaceId: run.spaceId, userId: run.userId, archivedAt: null },
+      select: { id: true, name: true, title: true, thread: { select: { id: true } } },
+    }),
+    listSharedBotsForSpace(deps.prisma, { spaceId: run.spaceId, userId: run.userId }),
+  ]);
+  const candidates = [
+    ...localCandidates.map((candidate) => ({ ...candidate, spaceId: run.spaceId })),
+    ...sharedCandidates.map((candidate) => ({
+      id: candidate.id,
+      name: candidate.name,
+      title: candidate.title,
+      thread: { id: candidate.threadId },
+      spaceId: candidate.spaceId,
+    })),
+  ];
   const target = resolveBotAddress(candidates, {
     botId: input.bot_id,
     name: input.confirm_name,
@@ -194,7 +208,6 @@ export async function messageBot(
         const stillAddressable = await tx.bot.findFirst({
           where: {
             id: target.id,
-            spaceId: run.spaceId,
             userId: run.userId,
             archivedAt: null,
           },
@@ -202,6 +215,25 @@ export async function messageBot(
         });
         if (!stillAddressable)
           return { ok: false as const, error: `${target.name} is no longer available` };
+        if (target.spaceId !== run.spaceId) {
+          const share = await tx.botWorkspaceShare.findFirst({
+            where: {
+              botId: target.id,
+              targetSpaceId: run.spaceId,
+              revokedAt: null,
+              bot: { userId: run.userId, archivedAt: null, spaceId: target.spaceId },
+              targetSpace: { memberships: { some: { userId: run.userId } } },
+            },
+            select: { id: true },
+          });
+          if (!share) return { ok: false as const, error: `${target.name} is no longer available` };
+        } else {
+          const local = await tx.bot.findFirst({
+            where: { id: target.id, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
+            select: { id: true },
+          });
+          if (!local) return { ok: false as const, error: `${target.name} is no longer available` };
+        }
 
         // Echo into the sender's chat in the same transaction so a failed notify
         // cannot leave one side delivered and the other blank.
@@ -235,7 +267,7 @@ export async function messageBot(
         });
         const task = await tx.task.create({
           data: {
-            spaceId: run.spaceId,
+            spaceId: target.spaceId,
             botId: target.id,
             threadId: targetThreadId,
             userId: run.userId,
@@ -245,7 +277,7 @@ export async function messageBot(
         });
         const nextRun = await tx.run.create({
           data: {
-            spaceId: run.spaceId,
+            spaceId: target.spaceId,
             botId: target.id,
             threadId: targetThreadId,
             taskId: task.id,
@@ -258,7 +290,7 @@ export async function messageBot(
         });
         await tx.message.update({ where: { id: inbound.id }, data: { runId: nextRun.id } });
         const inboundEvent = await appendEventInTransaction(tx, {
-          spaceId: run.spaceId,
+          spaceId: target.spaceId,
           threadId: targetThreadId,
           botId: target.id,
           type: "thread.message.created",

@@ -25,6 +25,7 @@ function deps(
     senderRunning?: boolean;
     alreadyDelivered?: unknown;
     targetArchived?: boolean;
+    sharedRows?: unknown[];
     /** Simulate a unique (threadId, clientNonce) race after both retries miss. */
     uniqueConflictOnCommit?: boolean;
     transactionConflictOnce?: boolean;
@@ -51,6 +52,9 @@ function deps(
     bot: {
       findFirst: vi.fn().mockResolvedValue(options.targetArchived ? null : { id: "bot-target" }),
     },
+    botWorkspaceShare: {
+      findFirst: vi.fn().mockResolvedValue({ id: "share-1" }),
+    },
     task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
     message: {
       findUnique: messageFindUnique,
@@ -70,6 +74,9 @@ function deps(
             { id: "bot-target", name: "Analyst", title: "", thread: { id: "thread-target" } },
           ],
         ),
+    },
+    botWorkspaceShare: {
+      findMany: vi.fn().mockResolvedValue(options.sharedRows ?? []),
     },
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
     run: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -132,6 +139,44 @@ describe("messaging another bot", () => {
       ),
     ).toHaveLength(2);
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers a shared target in its owner workspace", async () => {
+    const harness = deps({
+      sharedRows: [
+        {
+          bot: {
+            id: "bot-shared",
+            name: "Shared Analyst",
+            title: "",
+            description: "",
+            spaceId: "workspace-2",
+            space: { name: "Other workspace" },
+            thread: { id: "thread-shared" },
+          },
+        },
+      ],
+    });
+    const sent = await messageBot(harness.deps, run, sender, {
+      bot_id: "bot-shared",
+      message: "keep this in the owner workspace",
+    });
+
+    expect(sent).toMatchObject({ ok: true, botId: "bot-shared" });
+    expect(harness.tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          spaceId: "workspace-2",
+          botId: "bot-shared",
+          threadId: "thread-shared",
+        }),
+      }),
+    );
+    expect(harness.tx.run.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ spaceId: "workspace-2", botId: "bot-shared" }),
+      }),
+    );
   });
 
   it("tells the sender to continue independent work", async () => {

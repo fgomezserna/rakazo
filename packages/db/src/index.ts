@@ -1,4 +1,5 @@
 export * from "./bootstrap-user.js";
+export * from "./bot-shares.js";
 export * from "./cancel-runs.js";
 export * from "./client.js";
 export * from "./computers.js";

@@ -154,6 +154,27 @@ export const SetGroupGuestModeInput = z.object({
 });
 export type SetGroupGuestModeInput = z.infer<typeof SetGroupGuestModeInput>;
 
+export const BotWorkspaceShareSchema = z.object({
+  id: Id,
+  botId: Id,
+  targetSpaceId: Id,
+  targetSpaceName: z.string(),
+  createdAt: z.string(),
+});
+export type BotWorkspaceShare = z.infer<typeof BotWorkspaceShareSchema>;
+
+export const CreateBotWorkspaceShareInput = z.object({
+  botId: Id,
+  targetSpaceId: Id,
+});
+export type CreateBotWorkspaceShareInput = z.infer<typeof CreateBotWorkspaceShareInput>;
+
+export const RevokeBotWorkspaceShareInput = z.object({
+  botId: Id,
+  targetSpaceId: Id,
+});
+export type RevokeBotWorkspaceShareInput = z.infer<typeof RevokeBotWorkspaceShareInput>;
+
 export const GroupDetailSchema = GroupSchema.extend({
   messages: z.array(ThreadMessageSchema).optional(),
 });

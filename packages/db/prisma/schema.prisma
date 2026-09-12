@@ -189,6 +189,7 @@ model Space {
   secrets                     Secret[]
   chatGroups                  ChatGroup[]
   botSecrets BotSecret[]
+  botSharesReceived           BotWorkspaceShare[] @relation("BotWorkspaceShareTarget")
   externalConversations       ExternalConversation[]
   agentSecrets                AgentSecret[]
 
@@ -368,6 +369,7 @@ model Bot {
   groupMembers      ChatGroupMember[]
   groupGuests       ChatGroupGuest[]
   botSecrets BotSecret[]
+  workspaceShares BotWorkspaceShare[] @relation("BotWorkspaceShareBot")
 
   externalConversations ExternalConversation[]
 
@@ -484,6 +486,21 @@ model ChatGroupInvocation {
   @@index([groupId, createdAt])
   @@index([targetBotId, status])
   @@map("chat_group_invocations")
+}
+
+model BotWorkspaceShare {
+  id            String   @id @default(cuid())
+  botId         String
+  bot           Bot      @relation("BotWorkspaceShareBot", fields: [botId], references: [id], onDelete: Cascade)
+  targetSpaceId String
+  targetSpace   Space    @relation("BotWorkspaceShareTarget", fields: [targetSpaceId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  revokedAt     DateTime?
+
+  @@unique([botId, targetSpaceId])
+  @@index([targetSpaceId, revokedAt])
+  @@index([botId, revokedAt])
+  @@map("bot_workspace_shares")
 }
 
 model Thread {

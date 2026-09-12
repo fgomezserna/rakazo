@@ -3,10 +3,12 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type {
   AgentSkillCatalogEntry,
   Bot,
+  BotWorkspaceShare,
   ComputerMode,
   Me,
   ModelCatalogEntry,
   ModelCredential,
+  Space,
   ThinkingLevel,
   VoiceInfo,
 } from "@rakazo/contracts";
@@ -237,6 +239,11 @@ export function BotSettings({
   const [modelMetaReady, setModelMetaReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shares, setShares] = useState<BotWorkspaceShare[]>([]);
+  const [shareSpaces, setShareSpaces] = useState<Space[]>([]);
+  const [shareTargetId, setShareTargetId] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
   useEffect(() => {
     void rpc.voice
       .voices({})
@@ -253,6 +260,58 @@ export function BotSettings({
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([rpc.bots.shares.list({ botId: bot.id }), rpc.spaces.list()])
+      .then(([nextShares, navigation]) => {
+        if (cancelled) return;
+        setShares(nextShares);
+        setShareSpaces(navigation.spaces.filter((space) => space.id !== bot.spaceId));
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setShareError(err instanceof Error ? err.message : t`Could not load shares`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bot.id, bot.spaceId, t]);
+
+  async function addShare() {
+    if (!shareTargetId || shareBusy) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      const created = await rpc.bots.shares.create({
+        botId: bot.id,
+        targetSpaceId: shareTargetId,
+      });
+      setShares((current) => [
+        ...current.filter((share) => share.targetSpaceId !== created.targetSpaceId),
+        created,
+      ]);
+      setShareTargetId("");
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : t`Could not share bot`);
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function removeShare(share: BotWorkspaceShare) {
+    if (shareBusy) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      await rpc.bots.shares.revoke({ botId: bot.id, targetSpaceId: share.targetSpaceId });
+      setShares((current) => current.filter((item) => item.id !== share.id));
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : t`Could not revoke share`);
+    } finally {
+      setShareBusy(false);
+    }
+  }
 
   const connectedOptions: Array<{
     key: string;
@@ -369,6 +428,63 @@ export function BotSettings({
             />
           ))}
         </div>
+      </div>
+      <div className="mt-6 border-t border-border/60 pt-5" data-testid="bot-workspace-shares">
+        <div className="text-[14px] text-muted-foreground">
+          <Trans>Share with workspaces</Trans>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground/80">
+          <Trans>Shared bots keep their own memory, credentials, and execution.</Trans>
+        </p>
+        {shares.length ? (
+          <div className="mt-3 space-y-2">
+            {shares.map((share) => (
+              <div
+                key={share.id}
+                className="flex items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-2"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                  {share.targetSpaceName}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={shareBusy}
+                  onClick={() => void removeShare(share)}
+                >
+                  <Trans>Remove</Trans>
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {shareSpaces.length ? (
+          <div className="mt-3 flex items-center gap-2">
+            <NativeSelect
+              aria-label={t`Workspace to share with`}
+              className="min-w-0 flex-1"
+              value={shareTargetId}
+              onChange={(event) => setShareTargetId(event.target.value)}
+            >
+              <NativeSelectOption value="">{t`Choose a workspace`}</NativeSelectOption>
+              {shareSpaces
+                .filter((space) => !shares.some((share) => share.targetSpaceId === space.id))
+                .map((space) => (
+                  <NativeSelectOption key={space.id} value={space.id}>
+                    {space.name}
+                  </NativeSelectOption>
+                ))}
+            </NativeSelect>
+            <Button
+              size="sm"
+              disabled={!shareTargetId || shareBusy}
+              onClick={() => void addShare()}
+            >
+              <Trans>Share</Trans>
+            </Button>
+          </div>
+        ) : null}
+        {shareError ? <p className="mt-2 text-[13px] text-destructive">{shareError}</p> : null}
       </div>
       <details
         data-testid="bot-settings-advanced"

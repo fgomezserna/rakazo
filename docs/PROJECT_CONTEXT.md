@@ -104,6 +104,12 @@ The branch contains the following user-facing work, in chronological order:
 - `cd6d7d29`: adds explicit guest bots for cross-workspace groups, including
   mention-only invocation and permission checks. Keep guest memory,
   credentials and execution scoped to the owning workspace.
+- The bot-sharing flow extends this boundary with persistent bot-to-workspace
+  shares. A share is granted by the bot owner to another workspace in the same
+  account/organization; bots in that workspace can address it through the
+  teammate directory, while the target run, memory, credentials and computer
+  remain in the owner's workspace. This is not a cross-user invitation or a
+  direct proxy chat.
 - `e6d563f6`: adds workspace profile configuration (name and avatar) with owner
   checks and web/mobile surfaces.
 - `65745ab2` through `5c2ff955`: harden the noVNC screen path: retry transient

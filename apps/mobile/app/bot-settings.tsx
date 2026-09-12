@@ -3,6 +3,7 @@ import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
+  type BotWorkspaceShare,
   type ComputerMode,
   normalizeCreateBotProfile,
   type ThinkingLevel,
@@ -17,6 +18,8 @@ import {
   type MobileMe,
   type MobileModel,
   type MobileModelCredential,
+  type MobileSpace,
+  type MobileSpaceNavigation,
   rpc,
 } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -60,6 +63,9 @@ export default function BotSettingsScreen() {
   const [modelMetaReady, setModelMetaReady] = useState(false);
   const [modelMetaError, setModelMetaError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shares, setShares] = useState<BotWorkspaceShare[]>([]);
+  const [shareSpaces, setShareSpaces] = useState<MobileSpace[]>([]);
+  const [shareBusy, setShareBusy] = useState(false);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
@@ -100,6 +106,24 @@ export default function BotSettingsScreen() {
         setModelMetaError(err instanceof Error ? err.message : t("Could not load model settings"));
       });
   }, [t]);
+
+  useEffect(() => {
+    if (!botId) return;
+    let cancelled = false;
+    void Promise.all([
+      rpc<BotWorkspaceShare[]>("bots/shares/list", { botId }),
+      rpc<MobileSpaceNavigation>("spaces/list"),
+    ])
+      .then(([nextShares, navigation]) => {
+        if (cancelled) return;
+        setShares(nextShares);
+        setShareSpaces(navigation.spaces.filter((space) => space.id !== bot?.spaceId));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [bot?.spaceId, botId]);
 
   const connectedOptions = useMemo(() => {
     const options: ModelOption[] = [];
@@ -221,6 +245,41 @@ export default function BotSettingsScreen() {
       cancel: t("Cancel"),
       more: t("More"),
     });
+  }
+
+  function openSharePicker() {
+    const available = shareSpaces.filter(
+      (space) => !shares.some((share) => share.targetSpaceId === space.id),
+    );
+    if (!available.length || shareBusy || !botId) return;
+    presentMessageActionSheet({
+      title: t("Share with workspaces"),
+      actions: available.map((space) => ({
+        text: space.name,
+        onPress: () => {
+          setShareBusy(true);
+          void rpc<BotWorkspaceShare>("bots/shares/create", {
+            botId,
+            targetSpaceId: space.id,
+          })
+            .then((created) => setShares((current) => [...current, created]))
+            .catch((err) => setError(err instanceof Error ? err.message : t("Could not share bot")))
+            .finally(() => setShareBusy(false));
+        },
+      })),
+      colorScheme,
+      cancel: t("Cancel"),
+      more: t("More"),
+    });
+  }
+
+  function revokeShare(share: BotWorkspaceShare) {
+    if (!botId || shareBusy) return;
+    setShareBusy(true);
+    void rpc("bots/shares/revoke", { botId, targetSpaceId: share.targetSpaceId })
+      .then(() => setShares((current) => current.filter((item) => item.id !== share.id)))
+      .catch((err) => setError(err instanceof Error ? err.message : t("Could not revoke share")))
+      .finally(() => setShareBusy(false));
   }
 
   async function save() {
@@ -370,6 +429,62 @@ export default function BotSettingsScreen() {
             />
           ))}
         </ScrollView>
+        <View
+          style={{
+            marginTop: 20,
+            borderTopWidth: 1,
+            borderTopColor: tokens.border,
+            paddingTop: 16,
+          }}
+        >
+          <Text style={{ color: tokens.mutedForeground, fontSize: 14 }}>
+            {t("Share with workspaces")}
+          </Text>
+          <Text style={{ color: tokens.mutedForeground, marginTop: 5, fontSize: 13 }}>
+            {t("Shared bots keep their own memory, credentials, and execution.")}
+          </Text>
+          {shares.map((share) => (
+            <View
+              key={share.id}
+              style={{
+                marginTop: 10,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <Text style={{ color: tokens.foreground, flex: 1 }}>{share.targetSpaceName}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("Remove")}
+                disabled={shareBusy}
+                onPress={() => revokeShare(share)}
+              >
+                <Text style={{ color: tokens.destructive }}>{t("Remove")}</Text>
+              </Pressable>
+            </View>
+          ))}
+          {shareSpaces.some(
+            (space) => !shares.some((share) => share.targetSpaceId === space.id),
+          ) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("Share")}
+              disabled={shareBusy}
+              onPress={openSharePicker}
+              style={{
+                marginTop: 12,
+                borderWidth: 1,
+                borderColor: tokens.border,
+                borderRadius: 11,
+                paddingVertical: 12,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: tokens.foreground }}>{t("Share")}</Text>
+            </Pressable>
+          ) : null}
+        </View>
         <ComputerModePicker value={computerMode} onChange={setComputerMode} />
         <Pressable
           accessibilityRole="button"

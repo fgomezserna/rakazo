@@ -102,6 +102,7 @@ import {
   CannotDeleteLastSpaceError,
   CannotDeleteSpaceAsNonOwnerError,
   claimEmptySpaceDeletionForMember,
+  createBotWorkspaceShare,
   createExternalConversationRepos,
   createGroupRepos,
   createRepos,
@@ -118,6 +119,7 @@ import {
   InvalidSpaceNameError,
   IsolationError,
   issueMessagingLinkCode,
+  listBotWorkspaceShares,
   lockOwnedGroup,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
@@ -126,6 +128,7 @@ import {
   parseComputerMode,
   releaseSpaceDeletionClaim,
   renewSpaceDeletionClaim,
+  revokeBotWorkspaceShare,
   SPACE_DELETION_CLAIM_TIMEOUT_MS,
   SpaceDeletionInProgressError,
   SpaceLimitError,
@@ -1160,6 +1163,18 @@ export function createRouter(deps: RouterDeps) {
         }
         return duplicate;
       }),
+      shares: {
+        list: authed.bots.shares.list.handler(async ({ context, input }) =>
+          listBotWorkspaceShares(deps.prisma, context.actor, input.botId),
+        ),
+        create: authed.bots.shares.create.handler(async ({ context, input }) =>
+          createBotWorkspaceShare(deps.prisma, context.actor, input),
+        ),
+        revoke: authed.bots.shares.revoke.handler(async ({ context, input }) => {
+          await revokeBotWorkspaceShare(deps.prisma, context.actor, input);
+          return { ok: true as const };
+        }),
+      },
       reorder: authed.bots.reorder.handler(async ({ context, input }) => {
         await repos.reorderBots(context.actor, input.botIds);
         return { ok: true as const };

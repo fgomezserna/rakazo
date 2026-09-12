@@ -81,6 +81,7 @@ import {
   findDefaultModelCredential,
   findModelCredential,
   InvalidSpaceNameError,
+  listSharedBotsForSpace,
   loadRunHistoryMessages,
   type McpServer,
   type Prisma,
@@ -3370,29 +3371,46 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         const runtimeHistory = [...historicalContext, ...history];
         // Without a roster a bot only knows the bots it spawned itself.
-        const botDirectory = thread.groupId
-          ? undefined
-          : renderBotDirectory(
-              (
-                await deps.prisma.bot.findMany({
-                  where: {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    archivedAt: null,
-                    id: { not: bot.id },
-                    thread: { isNot: null },
-                  },
-                  select: { id: true, name: true, title: true, description: true },
-                  orderBy: { createdAt: "asc" },
-                  take: BOT_DIRECTORY_LIMIT,
-                })
-              ).map((peer) => ({
-                id: peer.id,
-                name: peer.name,
-                title: peer.title,
-                description: peer.description,
-              })),
-            );
+        const botDirectoryPeers = thread.groupId
+          ? null
+          : await Promise.all([
+              deps.prisma.bot.findMany({
+                where: {
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  archivedAt: null,
+                  id: { not: bot.id },
+                  thread: { isNot: null },
+                },
+                select: { id: true, name: true, title: true, description: true },
+                orderBy: { createdAt: "asc" },
+                take: BOT_DIRECTORY_LIMIT,
+              }),
+              listSharedBotsForSpace(deps.prisma, {
+                spaceId: run.spaceId,
+                userId: run.userId,
+              }),
+            ]);
+        const botDirectory = botDirectoryPeers
+          ? renderBotDirectory(
+              [
+                ...botDirectoryPeers[0]
+                  .filter((peer) => peer.id !== bot.id)
+                  .map((peer) => ({
+                    id: peer.id,
+                    name: peer.name,
+                    title: peer.title,
+                    description: peer.description,
+                  })),
+                ...botDirectoryPeers[1].map((peer) => ({
+                  id: peer.id,
+                  name: peer.name,
+                  title: peer.title,
+                  description: `${peer.description}${peer.description ? " " : ""}(shared from ${peer.spaceName})`,
+                })),
+              ].slice(0, BOT_DIRECTORY_LIMIT),
+            )
+          : undefined;
 
         try {
           const runtimeEvents = deps.runtime.run(
