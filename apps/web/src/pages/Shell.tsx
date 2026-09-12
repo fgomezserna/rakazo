@@ -5,6 +5,7 @@ import { ChatMarkdown } from "@rakazo/chat-ui/web";
 import type {
   AgentSkillCatalogEntry,
   Bot,
+  BotMentionTarget,
   BotSection,
   ComputerMode,
   ComputerReleaseReason,
@@ -326,6 +327,7 @@ export function ShellPage() {
   const userId = session.data?.user.id;
   const [groups, setGroups] = useState<Group[]>([]);
   const [bots, setBots] = useState<Bot[]>([]);
+  const [mentionBots, setMentionBots] = useState<BotMentionTarget[]>([]);
   const botsRef = useRef(bots);
   botsRef.current = bots;
   const botOrderEpochRef = useRef(0);
@@ -1755,36 +1757,64 @@ export function ShellPage() {
       ? t`You`
       : (resolveTranscriptMemberName(activeReplyTarget.botId) ?? active?.name ?? t`Bot`)
     : undefined;
-  const composerMentionTargets = useMemo(
-    () =>
-      buildComposerMentionOptions({
-        query: "",
-        includeEveryone: inGroup,
-        currentGroupId: groupId,
-        bots: [
-          ...bots.map((bot) => ({ id: bot.id, name: bot.name, color: bot.color })),
-          ...(inGroup
-            ? (transcriptMembers ?? [])
-                .filter((member) => member.shared)
-                .map((member) => ({
-                  id: member.botId,
-                  name: member.name,
-                  color: member.color,
-                }))
-            : []),
-        ],
-        groups: groups.map((group) => ({ id: group.id, name: group.name })),
-        routines: mentionRoutines.map((routine) => ({
-          id: routine.id,
-          name: routine.name,
-          crons: routine.crons,
-          botId: routine.botId,
-          botName: routine.botName,
-        })),
-        connectors: mentionConnectors,
-      }),
-    [bots, groupId, groups, inGroup, mentionConnectors, mentionRoutines, transcriptMembers],
-  );
+  const composerMentionTargets = useMemo(() => {
+    const mentionableBots = mentionBots.length
+      ? mentionBots
+      : bots.map((bot) => ({
+          id: bot.id,
+          name: bot.name,
+          color: bot.color,
+          spaceId: bot.spaceId,
+          spaceName: null,
+          shared: false,
+        }));
+    const byId = new Map(
+      mentionableBots.map((bot) => [
+        bot.id,
+        {
+          id: bot.id,
+          name: bot.name,
+          color: bot.color,
+          subtitle: bot.spaceName ?? undefined,
+        },
+      ]),
+    );
+    if (inGroup) {
+      for (const member of transcriptMembers ?? []) {
+        if (!member.shared || byId.has(member.botId)) continue;
+        byId.set(member.botId, {
+          id: member.botId,
+          name: member.name,
+          color: member.color,
+          subtitle: member.spaceName,
+        });
+      }
+    }
+    return buildComposerMentionOptions({
+      query: "",
+      includeEveryone: inGroup,
+      currentGroupId: groupId,
+      bots: [...byId.values()],
+      groups: groups.map((group) => ({ id: group.id, name: group.name })),
+      routines: mentionRoutines.map((routine) => ({
+        id: routine.id,
+        name: routine.name,
+        crons: routine.crons,
+        botId: routine.botId,
+        botName: routine.botName,
+      })),
+      connectors: mentionConnectors,
+    });
+  }, [
+    bots,
+    groupId,
+    groups,
+    inGroup,
+    mentionBots,
+    mentionConnectors,
+    mentionRoutines,
+    transcriptMembers,
+  ]);
   const shellReady =
     initialBotsLoaded &&
     (inGroup
@@ -1805,6 +1835,25 @@ export function ShellPage() {
   );
   const botsForMentionsRef = useRef(bots);
   botsForMentionsRef.current = bots;
+
+  useEffect(() => {
+    if (!initialBotsLoaded || !bootstrapMe?.spaceId) return;
+    let cancelled = false;
+    setMentionBots([]);
+    void rpc.bots.mentionTargets().then(
+      (targets) => {
+        if (!cancelled) setMentionBots(targets);
+      },
+      () => {
+        // The local bot list remains a safe fallback if an older server has not
+        // deployed the mention-target endpoint yet.
+        if (!cancelled) setMentionBots([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [bootstrapMe?.spaceId, initialBotsLoaded, mentionBotsKey]);
 
   useEffect(() => {
     const bots = botsForMentionsRef.current;

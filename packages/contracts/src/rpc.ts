@@ -14,6 +14,7 @@ import {
   ArtifactWithContentSchema,
   AvatarStyleSchema,
   BotMcpServerSchema,
+  BotMentionTargetSchema,
   BotSchema,
   BotSectionSchema,
   BotWorkspaceShareSchema,
@@ -223,6 +224,7 @@ export const appContract = {
   bots: {
     list: oc.output(z.array(BotSchema)),
     listArchived: oc.output(z.array(BotSchema)),
+    mentionTargets: oc.output(z.array(BotMentionTargetSchema)),
     get: oc.input(botId).output(BotSchema),
     create: oc.input(CreateBotInput).output(BotSchema),
     duplicate: oc.input(botId).output(BotSchema),

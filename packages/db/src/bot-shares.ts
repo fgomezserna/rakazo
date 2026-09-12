@@ -108,6 +108,7 @@ export async function revokeBotWorkspaceShare(
 export type SharedBotAddress = {
   id: string;
   name: string;
+  color: string;
   title: string;
   description: string;
   spaceId: string;
@@ -122,9 +123,11 @@ export async function listSharedBotsForSpace(
 ): Promise<SharedBotAddress[]> {
   // A few provider-neutral adapter fakes intentionally omit optional models.
   // Treat those as no shares; the generated production client always exposes it.
-  const shares = (prisma as PrismaClient & {
-    botWorkspaceShare?: PrismaClient["botWorkspaceShare"];
-  }).botWorkspaceShare;
+  const shares = (
+    prisma as PrismaClient & {
+      botWorkspaceShare?: PrismaClient["botWorkspaceShare"];
+    }
+  ).botWorkspaceShare;
   if (!shares) return [];
   const rows = await shares.findMany({
     where: {
@@ -142,6 +145,7 @@ export async function listSharedBotsForSpace(
         select: {
           id: true,
           name: true,
+          color: true,
           title: true,
           description: true,
           spaceId: true,
@@ -154,6 +158,17 @@ export async function listSharedBotsForSpace(
   });
   return rows.flatMap((row) => {
     if (!row.bot.thread) return [];
-    return [{ ...row.bot, spaceName: row.bot.space.name, threadId: row.bot.thread.id }];
+    return [
+      {
+        id: row.bot.id,
+        name: row.bot.name,
+        color: row.bot.color,
+        title: row.bot.title,
+        description: row.bot.description,
+        spaceId: row.bot.spaceId,
+        spaceName: row.bot.space.name,
+        threadId: row.bot.thread.id,
+      },
+    ];
   });
 }

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBotWorkspaceShare,
   listBotWorkspaceShares,
+  listSharedBotsForSpace,
   revokeBotWorkspaceShare,
 } from "./bot-shares.js";
 import type { PrismaClient } from "./client.js";
@@ -111,5 +112,46 @@ describe("bot workspace shares", () => {
       },
       data: { revokedAt: expect.any(Date) },
     });
+  });
+
+  it("lists active shared bots addressable from the current workspace", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        bot: {
+          id: "bot-shared",
+          name: "Shared Analyst",
+          color: "#6366f1",
+          title: "CRM specialist",
+          description: "Handles CRM requests",
+          spaceId: "space-owner",
+          space: { name: "Owner" },
+          thread: { id: "thread-shared" },
+        },
+      },
+    ]);
+    const prisma = { botWorkspaceShare: { findMany } } as unknown as PrismaClient;
+
+    await expect(
+      listSharedBotsForSpace(prisma, { spaceId: "space-target", userId: "user-1" }),
+    ).resolves.toEqual([
+      {
+        id: "bot-shared",
+        name: "Shared Analyst",
+        color: "#6366f1",
+        title: "CRM specialist",
+        description: "Handles CRM requests",
+        spaceId: "space-owner",
+        spaceName: "Owner",
+        threadId: "thread-shared",
+      },
+    ]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          targetSpaceId: "space-target",
+          revokedAt: null,
+        }),
+      }),
+    );
   });
 });

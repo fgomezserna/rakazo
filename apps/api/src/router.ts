@@ -78,6 +78,7 @@ import type { Auth } from "@rakazo/auth";
 import {
   type Actor,
   appContract,
+  type BotMentionTarget,
   type ComputerStatus,
   IntegrationProviderIdSchema,
   type McpServer,
@@ -120,6 +121,7 @@ import {
   IsolationError,
   issueMessagingLinkCode,
   listBotWorkspaceShares,
+  listSharedBotsForSpace,
   lockOwnedGroup,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
@@ -1112,6 +1114,39 @@ export function createRouter(deps: RouterDeps) {
       listArchived: authed.bots.listArchived.handler(async ({ context }) =>
         repos.listBots(context.actor, { archived: true }),
       ),
+      mentionTargets: authed.bots.mentionTargets.handler(async ({ context }) => {
+        const [localBots, sharedBots] = await Promise.all([
+          repos.listBots(context.actor),
+          listSharedBotsForSpace(deps.prisma, context.actor),
+        ]);
+        const localIds = new Set(localBots.map((bot) => bot.id));
+        return [
+          ...localBots.map(
+            (bot) =>
+              ({
+                id: bot.id,
+                name: bot.name,
+                color: bot.color,
+                spaceId: context.actor.spaceId,
+                spaceName: null,
+                shared: false,
+              }) satisfies BotMentionTarget,
+          ),
+          ...sharedBots
+            .filter((bot) => !localIds.has(bot.id))
+            .map(
+              (bot) =>
+                ({
+                  id: bot.id,
+                  name: bot.name,
+                  color: bot.color,
+                  spaceId: bot.spaceId,
+                  spaceName: bot.spaceName,
+                  shared: true,
+                }) satisfies BotMentionTarget,
+            ),
+        ];
+      }),
       get: authed.bots.get.handler(async ({ context, input }) => {
         const found = (await repos.listBots(context.actor)).find((bot) => bot.id === input.botId);
         if (!found) throw new IsolationError();

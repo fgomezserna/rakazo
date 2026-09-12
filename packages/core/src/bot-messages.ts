@@ -103,6 +103,7 @@ export function renderBotDirectory(bots: readonly BotAddress[]): string | undefi
     "<teammate_directory>",
     ...formatBotRosterLines(bots),
     "</teammate_directory>",
+    "When the user explicitly mentions a teammate with @Name, treat it as a request to involve that teammate and use message_bot with the matching id. Do not claim the teammate was contacted unless the tool succeeds.",
     "Use message_bot for useful updates, questions, and results. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.",
   ].join("\n");
 }

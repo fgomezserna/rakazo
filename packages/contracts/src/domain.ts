@@ -163,6 +163,17 @@ export const BotWorkspaceShareSchema = z.object({
 });
 export type BotWorkspaceShare = z.infer<typeof BotWorkspaceShareSchema>;
 
+/** A bot that the current workspace may address from the composer. */
+export const BotMentionTargetSchema = z.object({
+  id: Id,
+  name: z.string(),
+  color: z.string(),
+  spaceId: Id,
+  spaceName: z.string().nullable(),
+  shared: z.boolean(),
+});
+export type BotMentionTarget = z.infer<typeof BotMentionTargetSchema>;
+
 export const CreateBotWorkspaceShareInput = z.object({
   botId: Id,
   targetSpaceId: Id,

@@ -42,6 +42,19 @@ describe("buildComposerMentionOptions", () => {
     expect(options.find((option) => option.kind === "routine")?.subtitle).toMatch(/Weekdays/i);
   });
 
+  it("keeps the source workspace on shared bot options", () => {
+    const options = buildComposerMentionOptions({
+      query: "gest",
+      bots: [{ id: "b1", name: "Gestor CRM", color: "#6366f1", subtitle: "Personal" }],
+      groups: [],
+      routines: [],
+      connectors: [],
+    });
+    expect(options).toEqual([
+      expect.objectContaining({ kind: "bot", id: "b1", name: "Gestor CRM", subtitle: "Personal" }),
+    ]);
+  });
+
   it("disambiguates same-name routines with bot name", () => {
     const options = buildComposerMentionOptions({
       query: "daily",

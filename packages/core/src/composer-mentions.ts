@@ -19,7 +19,12 @@ export type ComposerMention = {
   authStatus?: "connected" | "needs_auth";
 };
 
-export type MentionPickerBot = { id: string; name: string; color?: string };
+export type MentionPickerBot = {
+  id: string;
+  name: string;
+  color?: string;
+  subtitle?: string;
+};
 export type MentionPickerGroup = { id: string; name: string };
 export type MentionPickerRoutine = {
   id: string;
@@ -175,7 +180,7 @@ export function buildComposerMentionOptions(input: {
       kind: "bot",
       id: bot.id,
       name: bot.name,
-      subtitle: "Bot",
+      subtitle: bot.subtitle ?? "Bot",
       color: bot.color,
     });
   }

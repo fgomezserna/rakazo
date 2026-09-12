@@ -108,6 +108,7 @@ describe("directory", () => {
     expect(directory).toContain("async");
     expect(directory).toContain("does not end your turn");
     expect(directory).toContain("Later updates only if they add something new");
+    expect(directory).toContain("explicitly mentions a teammate with @Name");
   });
 
   it("treats directory fields as untrusted prompt data", () => {
