@@ -82,6 +82,7 @@ import {
   findDefaultModelCredential,
   findModelCredential,
   InvalidSpaceNameError,
+  listBotsInSharedTargetSpaces,
   listSharedBotsForSpace,
   loadRunHistoryMessages,
   type McpServer,
@@ -3497,6 +3498,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 spaceId: run.spaceId,
                 userId: run.userId,
               }),
+              listBotsInSharedTargetSpaces(deps.prisma, {
+                botId: bot.id,
+                userId: run.userId,
+              }),
             ]);
         const botDirectory = botDirectoryPeers
           ? renderBotDirectory(
@@ -3514,6 +3519,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   name: peer.name,
                   title: peer.title,
                   description: `${peer.description}${peer.description ? " " : ""}(shared from ${peer.spaceName})`,
+                })),
+                ...botDirectoryPeers[2].map((peer) => ({
+                  id: peer.id,
+                  name: peer.name,
+                  title: peer.title,
+                  description: `${peer.description}${peer.description ? " " : ""}(shared to ${peer.spaceName})`,
                 })),
               ].slice(0, BOT_DIRECTORY_LIMIT),
             )

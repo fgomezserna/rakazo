@@ -172,3 +172,93 @@ export async function listSharedBotsForSpace(
     ];
   });
 }
+
+/**
+ * Bots in workspaces this bot has explicitly been shared into.
+ *
+ * A workspace share is the collaboration boundary in both directions: the
+ * invited bot is visible in the target workspace, and its owner can send a
+ * result back to bots in that invited workspace. The returned bots still use
+ * the owner's user identity, so this never becomes a cross-user directory.
+ */
+export async function listBotsInSharedTargetSpaces(
+  prisma: PrismaClient,
+  actor: Pick<Actor, "userId"> & { botId: string },
+): Promise<SharedBotAddress[]> {
+  const shares = (
+    prisma as PrismaClient & {
+      botWorkspaceShare?: PrismaClient["botWorkspaceShare"];
+    }
+  ).botWorkspaceShare;
+  if (!shares) return [];
+
+  const rows = await shares.findMany({
+    where: {
+      botId: actor.botId,
+      revokedAt: null,
+      targetSpace: {
+        memberships: { some: { userId: actor.userId } },
+      },
+    },
+    select: {
+      targetSpace: {
+        select: {
+          name: true,
+          bots: {
+            where: {
+              id: { not: actor.botId },
+              userId: actor.userId,
+              archivedAt: null,
+              thread: { isNot: null },
+            },
+            select: {
+              id: true,
+              name: true,
+              color: true,
+              title: true,
+              description: true,
+              spaceId: true,
+              thread: { select: { id: true } },
+            },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          },
+        },
+      },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+
+  return rows.flatMap((row) => {
+    // Provider-neutral test doubles may omit the nested relation. Production
+    // Prisma always returns it because it is selected above.
+    const targetSpace = row.targetSpace as
+      | {
+          name: string;
+          bots?: Array<{
+            id: string;
+            name: string;
+            color: string;
+            title: string;
+            description: string;
+            spaceId: string;
+            thread: { id: string } | null;
+          }>;
+        }
+      | undefined;
+    return (targetSpace?.bots ?? []).flatMap((bot) => {
+      if (!bot.thread) return [];
+      return [
+        {
+          id: bot.id,
+          name: bot.name,
+          color: bot.color,
+          title: bot.title,
+          description: bot.description,
+          spaceId: bot.spaceId,
+          spaceName: targetSpace?.name ?? "",
+          threadId: bot.thread.id,
+        },
+      ];
+    });
+  });
+}

@@ -2,6 +2,7 @@ import type { Actor } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   createBotWorkspaceShare,
+  listBotsInSharedTargetSpaces,
   listBotWorkspaceShares,
   listSharedBotsForSpace,
   revokeBotWorkspaceShare,
@@ -149,6 +150,51 @@ describe("bot workspace shares", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           targetSpaceId: "space-target",
+          revokedAt: null,
+        }),
+      }),
+    );
+  });
+
+  it("lists bots in workspaces the source bot was shared into", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        targetSpace: {
+          name: "Target",
+          bots: [
+            {
+              id: "bot-target",
+              name: "Commercial",
+              color: "#f97316",
+              title: "Commercial specialist",
+              description: "Handles commercial requests",
+              spaceId: "space-target",
+              thread: { id: "thread-target" },
+            },
+          ],
+        },
+      },
+    ]);
+    const prisma = { botWorkspaceShare: { findMany } } as unknown as PrismaClient;
+
+    await expect(
+      listBotsInSharedTargetSpaces(prisma, { botId: "bot-source", userId: "user-1" }),
+    ).resolves.toEqual([
+      {
+        id: "bot-target",
+        name: "Commercial",
+        color: "#f97316",
+        title: "Commercial specialist",
+        description: "Handles commercial requests",
+        spaceId: "space-target",
+        spaceName: "Target",
+        threadId: "thread-target",
+      },
+    ]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          botId: "bot-source",
           revokedAt: null,
         }),
       }),

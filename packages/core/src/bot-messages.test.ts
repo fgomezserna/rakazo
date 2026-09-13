@@ -109,6 +109,8 @@ describe("directory", () => {
     expect(directory).toContain("does not end your turn");
     expect(directory).toContain("Later updates only if they add something new");
     expect(directory).toContain("explicitly mentions a teammate with @Name");
+    expect(directory).toContain("shared/ folder is only a file area");
+    expect(directory).toContain("not a bot-delivery channel");
   });
 
   it("treats directory fields as untrusted prompt data", () => {

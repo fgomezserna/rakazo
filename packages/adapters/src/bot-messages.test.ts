@@ -26,6 +26,7 @@ function deps(
     alreadyDelivered?: unknown;
     targetArchived?: boolean;
     sharedRows?: unknown[];
+    outboundRows?: unknown[];
     /** Simulate a unique (threadId, clientNonce) race after both retries miss. */
     uniqueConflictOnCommit?: boolean;
     transactionConflictOnce?: boolean;
@@ -76,7 +77,11 @@ function deps(
         ),
     },
     botWorkspaceShare: {
-      findMany: vi.fn().mockResolvedValue(options.sharedRows ?? []),
+      findMany: vi
+        .fn()
+        .mockImplementation((args: { where?: { botId?: string } }) =>
+          args?.where?.botId ? (options.outboundRows ?? []) : (options.sharedRows ?? []),
+        ),
     },
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
     run: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -614,6 +619,53 @@ describe("automatic outcome return", () => {
       },
       data: { botOutcomeReturnedAt: expect.any(Date) },
     });
+  });
+
+  it("delivers to a bot in a workspace where the sender was shared", async () => {
+    const harness = deps({
+      outboundRows: [
+        {
+          targetSpace: {
+            name: "Commercial workspace",
+            bots: [
+              {
+                id: "bot-commercial",
+                name: "Commercial",
+                color: "#f97316",
+                title: "Commercial specialist",
+                description: "",
+                spaceId: "workspace-commercial",
+                thread: { id: "thread-commercial" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const sent = await messageBot(harness.deps, run, sender, {
+      bot_id: "bot-commercial",
+      message: "send the verified CRM briefing back",
+    });
+
+    expect(sent).toMatchObject({ ok: true, botId: "bot-commercial", name: "Commercial" });
+    expect(harness.tx.botWorkspaceShare.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            expect.objectContaining({ botId: "bot-commercial" }),
+            expect.objectContaining({ botId: "bot-sender" }),
+          ],
+        }),
+      }),
+    );
+    expect(harness.tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          spaceId: "workspace-commercial",
+          botId: "bot-commercial",
+        }),
+      }),
+    );
   });
 
   it("still returns a final result after an interim status update", async () => {

@@ -12,6 +12,7 @@ import {
 import {
   appendEventInTransaction,
   createThreadMessageInTransaction,
+  listBotsInSharedTargetSpaces,
   listSharedBotsForSpace,
   type PrismaClient,
   withTransactionRetry,
@@ -94,12 +95,13 @@ export async function messageBot(
   const intent = input.intent ?? "request";
   const hop = nextBotMessageHop(sourceContext?.hop);
 
-  const [localCandidates, sharedCandidates] = await Promise.all([
+  const [localCandidates, sharedCandidates, outboundCandidates] = await Promise.all([
     deps.prisma.bot.findMany({
       where: { spaceId: run.spaceId, userId: run.userId, archivedAt: null },
       select: { id: true, name: true, title: true, thread: { select: { id: true } } },
     }),
     listSharedBotsForSpace(deps.prisma, { spaceId: run.spaceId, userId: run.userId }),
+    listBotsInSharedTargetSpaces(deps.prisma, { botId: run.botId, userId: run.userId }),
   ]);
   const candidates = [
     ...localCandidates.map((candidate) => ({ ...candidate, spaceId: run.spaceId })),
@@ -110,7 +112,14 @@ export async function messageBot(
       thread: { id: candidate.threadId },
       spaceId: candidate.spaceId,
     })),
-  ];
+    ...outboundCandidates.map((candidate) => ({
+      id: candidate.id,
+      name: candidate.name,
+      title: candidate.title,
+      thread: { id: candidate.threadId },
+      spaceId: candidate.spaceId,
+    })),
+  ].filter((candidate, index, all) => all.findIndex((item) => item.id === candidate.id) === index);
   const target = resolveBotAddress(candidates, {
     botId: input.bot_id,
     name: input.confirm_name,
@@ -218,11 +227,20 @@ export async function messageBot(
         if (target.spaceId !== run.spaceId) {
           const share = await tx.botWorkspaceShare.findFirst({
             where: {
-              botId: target.id,
-              targetSpaceId: run.spaceId,
               revokedAt: null,
-              bot: { userId: run.userId, archivedAt: null, spaceId: target.spaceId },
               targetSpace: { memberships: { some: { userId: run.userId } } },
+              OR: [
+                {
+                  botId: target.id,
+                  targetSpaceId: run.spaceId,
+                  bot: { userId: run.userId, archivedAt: null, spaceId: target.spaceId },
+                },
+                {
+                  botId: sender.id,
+                  targetSpaceId: target.spaceId,
+                  bot: { userId: run.userId, archivedAt: null, spaceId: run.spaceId },
+                },
+              ],
             },
             select: { id: true },
           });
