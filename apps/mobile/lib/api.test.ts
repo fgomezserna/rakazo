@@ -1533,6 +1533,17 @@ describe("mobile thread event reduction", () => {
     expect(next.olderCursor).toBeNull();
   });
 
+  it("does not let an older refresh clear live peer presence", () => {
+    const live = {
+      ...snapshot(),
+      cursor: 8,
+      peerRuns: [{ id: "run-peer", botId: "bot-peer", status: "running" }],
+    };
+    const stale = { ...snapshot(), cursor: 7, peerRuns: [] };
+
+    expect(mergeMobileSnapshot(live, stale)).toBe(live);
+  });
+
   it("accumulates progress deltas for the same run", () => {
     const first = applyMobileThreadEvent(snapshot(), {
       type: "thread.progress",
@@ -1760,6 +1771,44 @@ describe("mobile thread event reduction", () => {
     expect(repeated?.run).toBe(waiting?.run);
   });
 
+  it("tracks a peer run as presence until it reaches a waiting state", () => {
+    const initial = snapshot();
+    const started = applyMobileThreadEvent(initial, {
+      type: "run.started",
+      runId: "run-peer",
+      botId: "bot-peer",
+      seq: 7,
+      payload: { trigger: "bot_message" },
+    });
+
+    expect(started?.run).toBeNull();
+    expect(started?.peerRuns).toEqual([
+      { id: "run-peer", botId: "bot-peer", status: "running", trigger: "bot_message" },
+    ]);
+
+    const completed = applyMobileThreadEvent(started, {
+      type: "run.completed",
+      runId: "run-peer",
+      seq: 8,
+    });
+    expect(completed?.peerRuns).toEqual([]);
+    expect(completed?.run).toBeNull();
+
+    const waiting = applyMobileThreadEvent(started, {
+      type: "run.waiting_input",
+      runId: "run-peer",
+      botId: "bot-peer",
+      seq: 9,
+    });
+
+    expect(waiting?.peerRuns).toEqual([]);
+    expect(waiting?.run).toMatchObject({
+      id: "run-peer",
+      status: "waiting_input",
+      trigger: "bot_message",
+    });
+  });
+
   it("applies computer takeover requests as waiting_takeover", () => {
     const progress = mobileMessage("progress:run-1", [{ kind: "progress", text: "working…" }], 1);
     const initial: MobileSnapshot = {
@@ -1805,10 +1854,20 @@ describe("mobile thread event reduction", () => {
       seq: 12,
     });
 
-    expect(waiting?.run).toEqual({ id: "run-peer", botId: "bot-peer", status: "waiting_takeover" });
+    expect(waiting?.run).toEqual({
+      id: "run-peer",
+      botId: "bot-peer",
+      status: "waiting_takeover",
+      trigger: "bot_message",
+    });
     expect(waiting?.activeRuns).toEqual([
       { id: "run-user", status: "running" },
-      { id: "run-peer", botId: "bot-peer", status: "waiting_takeover" },
+      {
+        id: "run-peer",
+        botId: "bot-peer",
+        status: "waiting_takeover",
+        trigger: "bot_message",
+      },
     ]);
     expect(waiting?.messages.some((message) => message.id.startsWith("progress:"))).toBe(false);
     expect(waiting?.computer?.busyBotName).toBeNull();

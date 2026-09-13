@@ -361,7 +361,7 @@ export async function threadSnapshot(
       }),
       deps.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
-        const [messagePage, last, waitingRun, busyOrFailed] = await Promise.all([
+        const [messagePage, last, waitingRun, busyOrFailed, peerRuns] = await Promise.all([
           loadMessagePage(tx, target.threadId, undefined, THREAD_MESSAGE_PAGE_SIZE),
           tx.event.findFirst({
             where: { threadId: target.threadId },
@@ -387,6 +387,17 @@ export async function threadSnapshot(
             },
             // The id tiebreak keeps ordering deterministic under equal
             // timestamps, matching the supersession probe below.
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          }),
+          // Keep peer activity separate from the primary run so the client can show presence
+          // without exposing delegated progress, failures, or a Stop action in this thread.
+          tx.run.findMany({
+            where: {
+              botId: target.botId,
+              threadId: target.threadId,
+              trigger: "bot_message",
+              status: { in: ["queued", "leased", "running"] },
+            },
             orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           }),
         ]);
@@ -430,7 +441,7 @@ export async function threadSnapshot(
                 orderBy: { seq: "asc" },
               })
             : [];
-        return { messagePage, last, run: currentRun, liveEvents };
+        return { messagePage, last, run: currentRun, peerRuns, liveEvents };
       }),
     ]);
     return {
@@ -440,13 +451,14 @@ export async function threadSnapshot(
       messages: messagesWithLiveEvents(core.messagePage.messages, core.liveEvents),
       olderCursor: core.messagePage.olderCursor,
       run: core.run ? mapRun(core.run) : null,
+      peerRuns: core.peerRuns.map(mapRun),
       computer: toComputerStatus(target.botId, target.bot.computer, busyBotName),
     };
   }
 
   const core = await deps.prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
-    const [messagePage, last, activeRuns, recentTerminals] = await Promise.all([
+    const [messagePage, last, activeRuns, recentTerminals, peerRuns] = await Promise.all([
       loadMessagePage(tx, target.threadId, undefined, THREAD_MESSAGE_PAGE_SIZE),
       tx.event.findFirst({
         where: { threadId: target.threadId },
@@ -476,6 +488,14 @@ export async function threadSnapshot(
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take: 50,
       }),
+      tx.run.findMany({
+        where: {
+          threadId: target.threadId,
+          trigger: "bot_message",
+          status: { in: ["queued", "leased", "running"] },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      }),
     ]);
     const liveEvents =
       activeRuns.length > 0
@@ -499,6 +519,7 @@ export async function threadSnapshot(
       messagePage,
       last,
       activeRuns,
+      peerRuns,
       terminalRun: pickLatestTerminalRun(recentTerminals),
       liveEvents,
     };
@@ -521,6 +542,7 @@ export async function threadSnapshot(
           ? mapRun(primaryActiveRun)
           : null,
     activeRuns: core.activeRuns.map(mapRun),
+    peerRuns: core.peerRuns.map(mapRun),
   };
 }
 

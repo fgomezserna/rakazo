@@ -18,7 +18,8 @@ describe("thread message pages", () => {
     expect(findUnique).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards peer waiting, ask, and text events on an open thread", () => {
+  it("forwards peer presence, waiting, ask, and text events on an open thread", () => {
+    expect(shouldForwardPeerThreadEvent({ type: "run.started", payload: {} })).toBe(true);
     expect(shouldForwardPeerThreadEvent({ type: "run.waiting_input", payload: {} })).toBe(true);
     expect(shouldForwardPeerThreadEvent({ type: "computer.takeover.requested", payload: {} })).toBe(
       true,

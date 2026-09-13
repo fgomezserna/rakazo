@@ -134,12 +134,13 @@ export async function isPeerRun(
   return peerRun;
 }
 
-/** Peer-run SSE events that must still reach an open thread (terminals, waits, receipts, asks, text). */
+/** Peer-run SSE events that must still reach an open thread (presence, terminals, waits, receipts, asks, text). */
 export function shouldForwardPeerThreadEvent(event: {
   type: string;
   payload: { blocks?: unknown };
 }): boolean {
   if (
+    event.type === "run.started" ||
     event.type === "run.completed" ||
     event.type === "run.failed" ||
     event.type === "run.cancelled" ||

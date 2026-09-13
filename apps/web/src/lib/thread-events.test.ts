@@ -6,6 +6,7 @@ import type {
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  activeThreadPeerRuns,
   activeThreadRuns,
   applyThreadSendReceipt,
   clearActiveThreadRuns,
@@ -354,7 +355,7 @@ describe("thread event reduction", () => {
     expect(progressed?.cursor).toBe(4);
   });
 
-  it("preserves bot_message when event-sourcing a peer run", () => {
+  it("tracks a peer run as presence without taking over the thread run", () => {
     const started = reduceThreadSnapshot(
       snapshot([]),
       event({
@@ -364,7 +365,38 @@ describe("thread event reduction", () => {
       }),
     );
 
-    expect(started?.run?.trigger).toBe("bot_message");
+    expect(started?.run).toBeNull();
+    expect(started?.peerRuns).toEqual([
+      expect.objectContaining({
+        id: "peer-run-1",
+        status: "running",
+        trigger: "bot_message",
+      }),
+    ]);
+    expect(activeThreadPeerRuns(started)).toEqual(started?.peerRuns);
+  });
+
+  it("clears peer presence on completion without surfacing a delegated failure", () => {
+    const started = reduceThreadSnapshot(
+      snapshot([]),
+      event({
+        type: "run.started",
+        runId: "peer-run-1",
+        payload: { trigger: "bot_message" },
+      }),
+    );
+    const failed = reduceThreadSnapshot(
+      started,
+      event({
+        type: "run.failed",
+        runId: "peer-run-1",
+        payload: { error: "peer exploded" },
+      }),
+    );
+
+    expect(failed?.peerRuns).toEqual([]);
+    expect(failed?.run).toBeNull();
+    expect(threadRunError(failed)).toBeNull();
   });
 
   it("preserves webhook when event-sourcing an inbound wake", () => {

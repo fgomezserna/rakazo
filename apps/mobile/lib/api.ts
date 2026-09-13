@@ -743,8 +743,16 @@ export type MobileSnapshot = {
   cursor?: number;
   messages: MobileMessage[];
   olderCursor: number | null;
-  run: { id: string; botId?: string; status: string; error?: string | null } | null;
-  activeRuns?: Array<{ id: string; botId?: string; status: string }>;
+  run: {
+    id: string;
+    botId?: string;
+    status: string;
+    trigger?: string;
+    error?: string | null;
+  } | null;
+  activeRuns?: Array<{ id: string; botId?: string; status: string; trigger?: string }>;
+  /** Active delegated runs are presence-only and must not block the composer. */
+  peerRuns?: Array<{ id: string; botId?: string; status: string; trigger?: string }>;
   members?: MobileGroup["members"];
   computer?: {
     state: string;
@@ -777,6 +785,15 @@ export function mergeMobileSnapshot(
   next: MobileSnapshot,
   preserveLoadedHistory = false,
 ): MobileSnapshot {
+  if (
+    prev &&
+    prev.threadId === next.threadId &&
+    typeof prev.cursor === "number" &&
+    typeof next.cursor === "number" &&
+    prev.cursor > next.cursor
+  ) {
+    return prev;
+  }
   return mergeThreadHistory(prev, next, preserveLoadedHistory);
 }
 
@@ -913,6 +930,38 @@ export function applyMobileThreadEvent(
       olderCursor: null,
       run: null,
       activeRuns: [],
+      peerRuns: [],
+    };
+  }
+  if (event.type === "run.started") {
+    if (!event.runId) return event.seq === undefined ? prev : { ...prev, cursor: event.seq };
+    const trigger =
+      typeof event.payload?.trigger === "string" ? String(event.payload.trigger) : undefined;
+    const startedRun = {
+      id: event.runId,
+      ...(event.botId ? { botId: event.botId } : {}),
+      status: "running",
+      ...(trigger ? { trigger } : {}),
+    };
+    if (trigger === "bot_message") {
+      return {
+        ...prev,
+        cursor: event.seq ?? prev.cursor,
+        peerRuns: [
+          ...(prev.peerRuns ?? []).filter((candidate) => candidate.id !== event.runId),
+          startedRun,
+        ],
+      };
+    }
+    const baseActive = prev.activeRuns ?? (prev.run ? [prev.run] : []);
+    const activeRuns = prev.groupId
+      ? [...baseActive.filter((candidate) => candidate.id !== event.runId), startedRun]
+      : [startedRun];
+    return {
+      ...prev,
+      cursor: event.seq ?? prev.cursor,
+      run: prev.groupId && prev.run?.status === "failed" ? prev.run : startedRun,
+      activeRuns,
     };
   }
   if (event.type === "run.waiting_input" || event.type === "computer.takeover.requested") {
@@ -927,9 +976,11 @@ export function applyMobileThreadEvent(
     const knownInActive = Boolean(
       runId && prev.activeRuns?.some((candidate) => candidate.id === runId),
     );
-    // Peer bot_message runs are omitted from snapshots while busy; the first wait
-    // event is how an open thread learns they need ask/takeover UI.
-    const needsInsert = Boolean(runId) && !knownInRun && !knownInActive;
+    const peerRun = runId ? prev.peerRuns?.find((candidate) => candidate.id === runId) : undefined;
+    const knownInPeer = Boolean(peerRun);
+    // Busy peer bot_message runs live in peerRuns; a wait event promotes one into
+    // the regular run state so its ask/takeover UI becomes answerable.
+    const needsInsert = Boolean(runId) && !knownInRun && !knownInActive && !knownInPeer;
     const runChanged = Boolean(knownInRun && prev.run && prev.run.status !== status);
     const activeRunChanged = Boolean(
       knownInActive &&
@@ -941,15 +992,25 @@ export function applyMobileThreadEvent(
         : prev.computer;
     const computerChanged = computer !== prev.computer;
     const cursor = event.seq ?? prev.cursor;
-    if (!runChanged && !activeRunChanged && !progressCleared && !needsInsert && !computerChanged) {
+    if (
+      !runChanged &&
+      !activeRunChanged &&
+      !progressCleared &&
+      !needsInsert &&
+      !knownInPeer &&
+      !computerChanged
+    ) {
       return cursor === prev.cursor ? prev : { ...prev, cursor };
     }
-    if (needsInsert && runId) {
-      const waitingRun = {
-        id: runId,
-        status,
-        ...(event.botId ? { botId: event.botId } : {}),
-      };
+    if ((needsInsert || knownInPeer) && runId) {
+      const waitingRun = peerRun
+        ? { ...peerRun, status }
+        : {
+            id: runId,
+            status,
+            trigger: "bot_message",
+            ...(event.botId ? { botId: event.botId } : {}),
+          };
       const baseActive = prev.activeRuns ?? (prev.run ? [prev.run] : []);
       const activeRuns = [...baseActive.filter((candidate) => candidate.id !== runId), waitingRun];
       const promoteWaiting =
@@ -962,6 +1023,9 @@ export function applyMobileThreadEvent(
         computer,
         run: promoteWaiting ? waitingRun : prev.run,
         activeRuns,
+        ...(knownInPeer
+          ? { peerRuns: prev.peerRuns?.filter((candidate) => candidate.id !== runId) }
+          : {}),
       };
     }
     const run = runChanged && prev.run ? { ...prev.run, status } : prev.run;
@@ -974,23 +1038,30 @@ export function applyMobileThreadEvent(
   }
   if (isRunTerminalEvent(event)) {
     const activeRuns = prev.activeRuns?.filter((candidate) => candidate.id !== event.runId);
+    const peerEnded = Boolean(prev.peerRuns?.some((candidate) => candidate.id === event.runId));
+    const peerRuns = prev.peerRuns?.filter((candidate) => candidate.id !== event.runId);
     const failure = runFailureError(event);
     const primaryEnded = prev.run?.id === event.runId ? prev.run : null;
     // A group member run can fail while another is displayed; see reduceThreadSnapshot.
     const endedRun =
       primaryEnded ?? prev.activeRuns?.find((candidate) => candidate.id === event.runId) ?? null;
+    const hidePeerFailure = peerEnded || endedRun?.trigger === "bot_message";
     return {
       ...prev,
       cursor: event.seq ?? prev.cursor,
       messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
       // A failed run stays in run so the thread can say why it stopped (see reduceThreadSnapshot).
-      run:
-        endedRun && failure
+      run: hidePeerFailure
+        ? primaryEnded
+          ? (activeRuns?.[0] ?? null)
+          : prev.run
+        : endedRun && failure
           ? { ...endedRun, status: "failed", error: failure }
           : primaryEnded
             ? (activeRuns?.[0] ?? null)
             : prev.run,
       activeRuns,
+      peerRuns,
     };
   }
   if (event.type === "thread.progress") {

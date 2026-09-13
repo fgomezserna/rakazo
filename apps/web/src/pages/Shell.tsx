@@ -170,6 +170,7 @@ import { clearSpaceSelection, rpc, selectedSpaceId, selectSpace } from "../lib/r
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../lib/run-error-storage";
 import { sharedInflight } from "../lib/shared-inflight";
 import {
+  activeThreadPeerRuns,
   activeThreadRuns,
   applyThreadSendReceipt,
   clearActiveThreadRuns,
@@ -1696,11 +1697,15 @@ export function ShellPage() {
       ? replyTarget
       : null;
   const currentRuns = activeThreadRuns(activeSnapshot);
+  const peerRuns = activeThreadPeerRuns(activeSnapshot);
   const answerableAskMessageId = latestAnswerableAskMessageId(activeSnapshot);
   const workingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
-  const transcriptRunning = workingRuns.length > 0;
+  const workingPeerRuns = peerRuns.filter((run) =>
+    ["running", "queued", "leased"].includes(run.status),
+  );
+  const transcriptRunning = workingRuns.length > 0 || workingPeerRuns.length > 0;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError = !sendError ? runError : null;
@@ -1739,15 +1744,19 @@ export function ShellPage() {
     },
     [bots, transcriptMembers],
   );
-  const workingBots: GroupAvatarMember[] = workingRuns.map((run) => {
+  const workingBots: GroupAvatarMember[] = [];
+  const seenWorkingBots = new Set<string>();
+  for (const run of [...workingRuns, ...workingPeerRuns]) {
+    if (seenWorkingBots.has(run.botId)) continue;
+    seenWorkingBots.add(run.botId);
     const bot = resolveTranscriptBot(run.botId);
-    return {
+    workingBots.push({
       botId: run.botId,
       color: bot?.color ?? FALLBACK_BOT_COLOR,
       name: bot?.name,
       status: run.status,
-    };
-  });
+    });
+  }
   const resolveTranscriptMemberName = useCallback(
     (botId: string | undefined) => memberName(transcriptMembers, botId),
     [transcriptMembers],

@@ -73,6 +73,13 @@ export function activeThreadRuns(
   return snapshot?.activeRuns ?? (snapshot?.run ? [snapshot.run] : []);
 }
 
+/** Runs delegated by another bot are presence-only in the owning thread. */
+export function activeThreadPeerRuns(
+  snapshot: ThreadSnapshot | null,
+): NonNullable<ThreadSnapshot["peerRuns"]> {
+  return snapshot?.peerRuns ?? [];
+}
+
 /**
  * Reflect a committed direct-message send before its follow-up snapshot arrives.
  *
@@ -122,7 +129,9 @@ export function threadRunError(
   dismissedRunIds?: ReadonlySet<string>,
 ): string | null {
   const run = snapshot?.run;
-  if (run?.status !== "failed" || dismissedRunIds?.has(run.id)) return null;
+  if (run?.status !== "failed" || run.trigger === "bot_message" || dismissedRunIds?.has(run.id)) {
+    return null;
+  }
   return run.error ?? null;
 }
 
@@ -135,6 +144,7 @@ export function clearActiveThreadRuns(snapshot: ThreadSnapshot): ThreadSnapshot 
     ...snapshot,
     run: null,
     activeRuns: [],
+    peerRuns: [],
     messages: snapshot.messages.filter(
       (message) =>
         !message.runId || !runIds.has(message.runId) || !message.id.startsWith("progress:"),
@@ -271,6 +281,7 @@ export function reduceThreadSnapshot(
       olderCursor: null,
       run: null,
       activeRuns: [],
+      peerRuns: [],
     };
   }
   if (event.type === "run.started") {
@@ -283,8 +294,17 @@ export function reduceThreadSnapshot(
     }
     const previousRun =
       prev.activeRuns?.find((candidate) => candidate.id === event.runId) ??
+      prev.peerRuns?.find((candidate) => candidate.id === event.runId) ??
       (prev.run?.id === event.runId ? prev.run : undefined);
     const run = runFromStartedEvent(event, previousRun);
+    if (run.trigger === "bot_message") {
+      return {
+        ...prev,
+        cursor: event.seq,
+        members: updateMemberStatus(prev.members, event.botId, "running"),
+        peerRuns: [...(prev.peerRuns ?? []).filter((candidate) => candidate.id !== run.id), run],
+      };
+    }
     const without = (prev.activeRuns ?? (prev.run ? [prev.run] : [])).filter(
       (candidate) => candidate.id !== run.id,
     );
@@ -307,9 +327,11 @@ export function reduceThreadSnapshot(
     const knownInActive = Boolean(
       runId && prev.activeRuns?.some((candidate) => candidate.id === runId),
     );
-    // Peer bot_message runs are omitted from snapshots while busy; the first wait
-    // event is how an open thread learns they need ask/takeover UI.
-    const needsInsert = Boolean(runId) && !knownInRun && !knownInActive;
+    const peerRun = runId ? prev.peerRuns?.find((candidate) => candidate.id === runId) : undefined;
+    const knownInPeer = Boolean(peerRun);
+    // Busy peer bot_message runs live in peerRuns; a wait event promotes one into
+    // the regular run state so its ask/takeover UI becomes answerable.
+    const needsInsert = Boolean(runId) && !knownInRun && !knownInActive && !knownInPeer;
     const runChanged = Boolean(knownInRun && prev.run && prev.run.status !== status);
     const activeRunChanged = Boolean(
       knownInActive &&
@@ -327,27 +349,30 @@ export function reduceThreadSnapshot(
       !runChanged &&
       !activeRunChanged &&
       !needsInsert &&
+      !knownInPeer &&
       members === prev.members &&
       messages === prev.messages
     ) {
       return prev;
     }
-    if (needsInsert && runId) {
-      const waitingRun: Run = {
-        id: runId,
-        botId: event.botId,
-        threadId: event.threadId,
-        taskId: runId,
-        status,
-        trigger: "bot_message",
-        routineId: null,
-        modelProvider: null,
-        modelId: null,
-        error: null,
-        startedAt: event.createdAt,
-        completedAt: null,
-        createdAt: event.createdAt,
-      };
+    if ((needsInsert || knownInPeer) && runId) {
+      const waitingRun: Run = peerRun
+        ? { ...peerRun, status }
+        : {
+            id: runId,
+            botId: event.botId,
+            threadId: event.threadId,
+            taskId: runId,
+            status,
+            trigger: "bot_message",
+            routineId: null,
+            modelProvider: null,
+            modelId: null,
+            error: null,
+            startedAt: event.createdAt,
+            completedAt: null,
+            createdAt: event.createdAt,
+          };
       const baseActive = prev.activeRuns ?? (prev.run ? [prev.run] : []);
       const activeRuns = [...baseActive.filter((candidate) => candidate.id !== runId), waitingRun];
       const promoteWaiting =
@@ -360,6 +385,9 @@ export function reduceThreadSnapshot(
         messages,
         run: promoteWaiting ? waitingRun : prev.run,
         activeRuns,
+        ...(knownInPeer
+          ? { peerRuns: prev.peerRuns?.filter((candidate) => candidate.id !== runId) }
+          : {}),
       };
     }
     return {
@@ -377,13 +405,17 @@ export function reduceThreadSnapshot(
   }
   if (isRunTerminalEvent(event)) {
     const activeRuns = prev.activeRuns?.filter((candidate) => candidate.id !== event.runId);
-    const nextMemberRun = activeRuns?.find((candidate) => candidate.botId === event.botId);
+    const peerRuns = prev.peerRuns?.filter((candidate) => candidate.id !== event.runId);
+    const nextMemberRun = [...(activeRuns ?? []), ...(peerRuns ?? [])].find(
+      (candidate) => candidate.botId === event.botId,
+    );
     const failure = runFailureError(event);
     const primaryEnded = prev.run?.id === event.runId ? prev.run : null;
     // In a group the failing run may be a member run rather than the displayed one, so look
     // it up in activeRuns as well or its error would be dropped with it.
     const endedRun =
       primaryEnded ?? prev.activeRuns?.find((candidate) => candidate.id === event.runId) ?? null;
+    const hidePeerFailure = endedRun?.trigger === "bot_message";
     return {
       ...prev,
       cursor: event.seq,
@@ -391,13 +423,17 @@ export function reduceThreadSnapshot(
       members: updateMemberStatus(prev.members, event.botId, nextMemberRun?.status ?? "idle"),
       // A failed run stays in run (activeRuns already excludes it) so the transcript can say
       // why it stopped, matching what threads.get returns on the next load.
-      run:
-        endedRun && failure
+      run: hidePeerFailure
+        ? primaryEnded
+          ? (activeRuns?.[0] ?? null)
+          : prev.run
+        : endedRun && failure
           ? { ...endedRun, status: "failed", error: failure }
           : primaryEnded
             ? (activeRuns?.[0] ?? null)
             : prev.run,
       activeRuns,
+      peerRuns,
     };
   }
   if (event.type === "thread.progress") {

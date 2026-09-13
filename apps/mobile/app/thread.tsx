@@ -388,12 +388,22 @@ function Thread() {
   const displayName = currentBot?.name ?? name;
   const notificationThreadId = snap?.threadId ?? currentBot?.threadId;
   activeThreadId.current = notificationThreadId;
+  const currentPeerRun = !inGroup
+    ? snap?.peerRuns?.find((run) => isWorkingStatus(run.status))
+    : undefined;
   const currentBotStatus = snap ? snap.run?.status : currentBot?.status;
+  const displayedBotStatus =
+    currentBotStatus && isWorkingStatus(currentBotStatus)
+      ? currentBotStatus
+      : (currentPeerRun?.status ?? currentBotStatus);
   const hasLiveProgress = visibleMessages.some((message) => message.id.startsWith("progress:"));
   const workingGroupBots = useMemo(() => {
     if (!inGroup) return [];
     const seen = new Set<string>();
-    const working = snap?.activeRuns ?? (snap?.run ? [snap.run] : []);
+    const working = [
+      ...(snap?.activeRuns ?? (snap?.run ? [snap.run] : [])),
+      ...(snap?.peerRuns ?? []),
+    ];
     return working.flatMap((run) => {
       if (!run.botId || seen.has(run.botId) || !isWorkingStatus(run.status)) return [];
       const member = snap?.members?.find((candidate) => candidate.botId === run.botId);
@@ -401,8 +411,11 @@ function Thread() {
       seen.add(run.botId);
       return [{ ...member, status: run.status }];
     });
-  }, [inGroup, snap?.activeRuns, snap?.members, snap?.run]);
-  const working = inGroup ? workingGroupBots.length > 0 : isWorkingStatus(currentBotStatus);
+  }, [inGroup, snap?.activeRuns, snap?.members, snap?.peerRuns, snap?.run]);
+  const composerStatus = inGroup ? undefined : snap ? snap.run?.status : currentBot?.status;
+  const working = inGroup
+    ? (snap?.activeRuns ?? (snap?.run ? [snap.run] : [])).some((run) => isWorkingStatus(run.status))
+    : isWorkingStatus(composerStatus);
 
   useEffect(() => {
     void rpc<AgentSkillCatalogEntry[]>("agentSkills/list")
@@ -539,7 +552,7 @@ function Thread() {
               color={currentBot.color}
               identity={currentBot.id}
               size={34}
-              status={currentBotStatus}
+              status={displayedBotStatus}
               muted={!currentBot.notifyOnFinish}
             />
           ) : null}
@@ -584,7 +597,7 @@ function Thread() {
   }, [
     botId,
     currentBot,
-    currentBotStatus,
+    displayedBotStatus,
     displayName,
     groupId,
     inGroup,
@@ -895,6 +908,7 @@ function Thread() {
                 event.type === "thread.subagent" ||
                 event.type === "thread.cloud_agent" ||
                 event.type === "thread.cleared" ||
+                event.type === "run.started" ||
                 event.type === "run.waiting_input" ||
                 event.type === "computer.takeover.requested" ||
                 isRunTerminalEvent(event)
@@ -1271,7 +1285,10 @@ function Thread() {
   }
 
   const answerableAskMessageId = latestAnswerableAskMessageId(snap);
-  const runError = snap?.run?.status === "failed" ? (snap.run.error ?? null) : null;
+  const runError =
+    snap?.run?.status === "failed" && snap.run.trigger !== "bot_message"
+      ? (snap.run.error ?? null)
+      : null;
   const liveMessages = useMemo(() => [...visibleMessages].reverse(), [visibleMessages]);
   const messagesById = useMemo(
     () => new Map((snap?.messages ?? []).map((message) => [message.id, message])),
@@ -1385,7 +1402,7 @@ function Thread() {
       : undefined;
     const activityStatus = activityBotId
       ? (snap?.activeRuns?.find((run) => run.botId === activityBotId)?.status ??
-        (snap?.run?.botId === activityBotId ? snap.run.status : currentBotStatus))
+        (snap?.run?.botId === activityBotId ? snap.run.status : displayedBotStatus))
       : undefined;
     return (
       <View
@@ -1488,7 +1505,7 @@ function Thread() {
   }
 
   const workingFooter =
-    !inGroup && currentBot && isWorkingStatus(currentBotStatus) && !hasLiveProgress ? (
+    !inGroup && currentBot && isWorkingStatus(displayedBotStatus) && !hasLiveProgress ? (
       <View
         accessibilityLabel={t("{name} is working", { name: currentBot.name })}
         accessibilityRole="text"
@@ -1503,7 +1520,7 @@ function Thread() {
           color={currentBot.color}
           identity={currentBot.id}
           size={28}
-          status={currentBotStatus}
+          status={displayedBotStatus}
         />
       </View>
     ) : inGroup && workingGroupBots.length > 0 ? (

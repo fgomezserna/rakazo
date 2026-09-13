@@ -186,7 +186,7 @@ describe("threadSnapshot", () => {
         findFirst: vi.fn().mockResolvedValue({ seq: 4 }),
         findMany: findManyEvents,
       },
-      run: { findFirst: botRunFindFirst([run]) },
+      run: { findFirst: botRunFindFirst([run]), findMany: vi.fn().mockResolvedValue([]) },
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -248,7 +248,7 @@ describe("threadSnapshot", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: findManyEvents,
       },
-      run: { findFirst: findFirstRun },
+      run: { findFirst: findFirstRun, findMany: vi.fn().mockResolvedValue([]) },
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -333,7 +333,10 @@ describe("threadSnapshot", () => {
                 findFirst: vi.fn().mockResolvedValue(null),
                 findMany: vi.fn().mockResolvedValue([]),
               },
-              run: { findFirst: botRunFindFirst([waitingPeer, olderUser]) },
+              run: {
+                findFirst: botRunFindFirst([waitingPeer, olderUser]),
+                findMany: vi.fn().mockResolvedValue([]),
+              },
             }),
           ),
         } as unknown as PrismaClient,
@@ -348,6 +351,64 @@ describe("threadSnapshot", () => {
 
     expect(snapshot.run).toEqual(
       expect.objectContaining({ id: "run-peer-waiting", status: "waiting_input" }),
+    );
+  });
+
+  it("returns active peer runs as presence without selecting them as the primary run", async () => {
+    const peerActive = {
+      id: "run-peer-active",
+      botId: "bot-1",
+      threadId: "thread-1",
+      taskId: "task-peer",
+      status: "running",
+      trigger: "bot_message",
+      modelProvider: null,
+      modelId: null,
+      error: null,
+      startedAt: new Date("2026-08-23T00:00:02.000Z"),
+      completedAt: null,
+      createdAt: new Date("2026-08-23T00:00:02.000Z"),
+    };
+    const findManyPeerRuns = vi.fn().mockResolvedValue([peerActive]);
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+      message: { findMany: vi.fn().mockResolvedValue([]) },
+      event: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      run: {
+        findFirst: botRunFindFirst([]),
+        findMany: findManyPeerRuns,
+      },
+    };
+    const snapshot = await threadSnapshot(
+      {
+        prisma: {
+          $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+        } as unknown as PrismaClient,
+      },
+      {
+        kind: "bot",
+        botId: "bot-1",
+        threadId: "thread-1",
+        bot: { computer: null },
+      } as ThreadTarget,
+    );
+
+    expect(snapshot.run).toBeNull();
+    expect(snapshot.peerRuns).toEqual([
+      expect.objectContaining({ id: "run-peer-active", status: "running" }),
+    ]);
+    expect(findManyPeerRuns).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          botId: "bot-1",
+          threadId: "thread-1",
+          trigger: "bot_message",
+          status: { in: ["queued", "leased", "running"] },
+        },
+      }),
     );
   });
 
@@ -388,7 +449,7 @@ describe("threadSnapshot", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn(),
       },
-      run: { findFirst: findFirstRun },
+      run: { findFirst: findFirstRun, findMany: vi.fn().mockResolvedValue([]) },
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -424,7 +485,7 @@ describe("threadSnapshot", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: findManyEvents,
       },
-      run: { findFirst: findFirstRun },
+      run: { findFirst: findFirstRun, findMany: vi.fn().mockResolvedValue([]) },
     };
     const prisma = {
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -533,6 +594,9 @@ describe("threadSnapshot", () => {
     const snapshot = await threadSnapshot({ prisma: groupPrisma(findManyRuns) }, groupTarget());
 
     expect(snapshot.activeRuns).toEqual([]);
+    expect(snapshot.peerRuns).toEqual([
+      expect.objectContaining({ id: "run-peer-active", status: "running" }),
+    ]);
     expect(snapshot.run).toBeNull();
     expect(findManyRuns).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -858,11 +922,12 @@ function matchesPeerActiveFilter(
   row: { trigger?: string; status?: string },
   where:
     | {
-        trigger?: { not?: string };
+        trigger?: { not?: string } | string;
         OR?: Array<{ trigger?: { not?: string }; status?: { in?: string[] } }>;
       }
     | undefined,
 ) {
+  if (typeof where?.trigger === "string") return row.trigger === where.trigger;
   if (where?.trigger?.not === "bot_message") return row.trigger !== "bot_message";
   if (!where?.OR) return true;
   return where.OR.some((clause) => {
@@ -884,7 +949,7 @@ function botRunFindFirst(
     async (args: {
       where?: {
         status?: { in?: string[] };
-        trigger?: { not?: string };
+        trigger?: { not?: string } | string;
       };
       select?: { id?: boolean };
     }) => {
@@ -910,7 +975,7 @@ function groupRunFindMany(input: { active?: unknown[]; terminals?: unknown[] }) 
     async (args: {
       where?: {
         status?: { in?: string[] };
-        trigger?: { not?: string };
+        trigger?: { not?: string } | string;
         OR?: Array<{ trigger?: { not?: string }; status?: { in?: string[] } }>;
       };
     }) => {
