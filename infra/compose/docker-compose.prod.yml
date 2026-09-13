@@ -58,6 +58,13 @@ services:
       CLOUD_AGENT_PROVIDER: ${CLOUD_AGENT_PROVIDER:-none}
       CLOUD_AGENT_SPACE_ID: ${CLOUD_AGENT_SPACE_ID:-}
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      CODEX_SERVER_HOST: ${CODEX_SERVER_HOST:-}
+      CODEX_SERVER_USER: ${CODEX_SERVER_USER:-}
+      CODEX_SERVER_PORT: ${CODEX_SERVER_PORT:-22}
+      CODEX_SSH_KEY_PATH: ${CODEX_SSH_KEY_PATH:-/run/secrets/codex_server_key}
+      CODEX_SSH_KEY_FINGERPRINT: ${CODEX_SSH_KEY_FINGERPRINT:-}
+      CODEX_SERVER_KNOWN_HOSTS_PATH: ${CODEX_SERVER_KNOWN_HOSTS_PATH:-/run/secrets/codex_server_known_hosts}
+      CODEX_SSH_TIMEOUT_MS: ${CODEX_SSH_TIMEOUT_MS:-30000}
       WAKEUP_DRIVER: graphile
       AGENT_RUNTIME: pi
       # Optional egress proxy (Mainland / corporate). Empty = unset; either case works.
@@ -116,6 +123,13 @@ services:
       CLOUD_AGENT_PROVIDER: ${CLOUD_AGENT_PROVIDER:-none}
       CLOUD_AGENT_SPACE_ID: ${CLOUD_AGENT_SPACE_ID:-}
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      CODEX_SERVER_HOST: ${CODEX_SERVER_HOST:-}
+      CODEX_SERVER_USER: ${CODEX_SERVER_USER:-}
+      CODEX_SERVER_PORT: ${CODEX_SERVER_PORT:-22}
+      CODEX_SSH_KEY_PATH: ${CODEX_SSH_KEY_PATH:-/run/secrets/codex_server_key}
+      CODEX_SSH_KEY_FINGERPRINT: ${CODEX_SSH_KEY_FINGERPRINT:-}
+      CODEX_SERVER_KNOWN_HOSTS_PATH: ${CODEX_SERVER_KNOWN_HOSTS_PATH:-/run/secrets/codex_server_known_hosts}
+      CODEX_SSH_TIMEOUT_MS: ${CODEX_SSH_TIMEOUT_MS:-30000}
       SCREEN_PROXY_SECRET: ""
       WAKEUP_DRIVER: graphile
       AGENT_RUNTIME: pi
@@ -128,6 +142,8 @@ services:
       no_proxy: ${no_proxy:-${NO_PROXY:-}}
     volumes:
       - appdata:/data
+      - ${CODEX_SSH_KEY_FILE:-/dev/null}:/run/secrets/codex_server_key:ro
+      - ${CODEX_SERVER_KNOWN_HOSTS_FILE:-/dev/null}:/run/secrets/codex_server_known_hosts:ro
     networks:
       - app
       - data

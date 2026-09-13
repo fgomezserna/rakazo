@@ -4,6 +4,44 @@ Cloud agents delegate a repository task to a hosted coding agent and track its r
 
 The default is `CLOUD_AGENT_PROVIDER=none`. Core workflows do not require Cursor or any other hosted coding provider.
 
+## Self-hosted Codex server
+
+Rakazo can use a Codex app-server host on the same private LAN instead of a
+hosted vendor. The worker opens an SSH connection to a forced-command identity
+and the Codex LXC owns each detached job under `/srv/rakazo-bridge`; bot
+computers never receive this key and port `1455` remains loopback-only.
+
+Configure the API and worker with the same non-secret connection settings, and
+mount the private key and the pinned host-key file into the worker only:
+
+```dotenv
+CLOUD_AGENT_PROVIDER=codex
+CLOUD_AGENT_SPACE_ID=<space-id>
+CODEX_SERVER_HOST=192.168.1.236
+CODEX_SERVER_USER=codex
+CODEX_SERVER_PORT=22
+CODEX_SSH_KEY_PATH=/run/secrets/codex_server_key
+CODEX_SSH_KEY_FINGERPRINT=SHA256:<fingerprint>
+CODEX_SERVER_KNOWN_HOSTS_PATH=/run/secrets/codex_server_known_hosts
+CODEX_SSH_TIMEOUT_MS=30000
+```
+
+The SSH public key must be restricted on the server with `from=`,
+`restrict`, `no-pty`, and the exact forced command
+`/usr/local/sbin/rakazo-codex-bridge`. The bridge accepts only `launch`,
+`status`, `reply`, and `cancel`; prompts and repository URLs are base64
+encoded by the worker and repository URLs must be HTTPS without credentials.
+Launches require an explicit repository URL. The bridge clones a known local
+repository when available, otherwise it creates an isolated shallow checkout
+under `/srv/rakazo-bridge/jobs/<id>` and runs `codex exec` on a per-operation
+branch. `openPr` is intentionally not advertised as a server-side guarantee;
+push/PR credentials must be added as a separate, approval-gated integration.
+
+Rotate the key by stopping or finishing active Codex operations, installing the
+new public key and worker secret, then restarting the worker. The connection
+fingerprint is part of the persisted provider binding, so a changed key fails
+closed instead of silently routing existing operations to a different server.
+
 ## Enable Cursor
 
 Configure the API and worker with the same values:

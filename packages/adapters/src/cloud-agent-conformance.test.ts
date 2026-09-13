@@ -4,6 +4,7 @@ import { EmulatorCloudAgentProvider } from "./cloud-agent-emulator.js";
 import { cloudAgentsEnabled, createCloudAgentConnection } from "./cloud-agent-factory.js";
 import { resolveCloudAgentProvider } from "./cloud-agent-provider-env.js";
 import { CursorCloudAgentProvider } from "./cursor-cloud-agent.js";
+import { CodexServerCloudAgentProvider } from "./codex-server-cloud-agent.js";
 import { CursorCloudAgentEmulator } from "./testing/cursor-cloud-agent-emulator.js";
 
 const ctx: AdapterContext = {
@@ -108,6 +109,31 @@ describe("cloud agent composition", () => {
       CLOUD_AGENT_SPACE_ID: "test-space",
     })!;
     expect(rotated.key).not.toBe(connection.key);
+  });
+  it("enables the self-hosted Codex server only with an explicit Space and key identity", () => {
+    expect(
+      resolveCloudAgentProvider({
+        CLOUD_AGENT_PROVIDER: "codex",
+        CLOUD_AGENT_SPACE_ID: "test-space",
+        CODEX_SERVER_HOST: "192.168.1.236",
+        CODEX_SERVER_USER: "codex",
+        CODEX_SSH_KEY_PATH: "/run/secrets/key",
+      }),
+    ).toBe("none");
+    const source = {
+      CLOUD_AGENT_PROVIDER: "codex",
+      CLOUD_AGENT_SPACE_ID: "test-space",
+      CODEX_SERVER_HOST: "192.168.1.236",
+      CODEX_SERVER_USER: "codex",
+      CODEX_SSH_KEY_PATH: "/run/secrets/key",
+      CODEX_SSH_KEY_FINGERPRINT: "SHA256:test",
+    };
+    expect(resolveCloudAgentProvider(source)).toBe("codex-server");
+    const connection = createCloudAgentConnection(source)!;
+    expect(connection.provider).toBeInstanceOf(CodexServerCloudAgentProvider);
+    expect(connection.key).not.toContain("SHA256:test");
+    expect(cloudAgentsEnabled(connection, "test-space")).toBe(true);
+    expect(cloudAgentsEnabled(connection, "other-space")).toBe(false);
   });
   it("never grants an unscoped live provider access", () => {
     expect(

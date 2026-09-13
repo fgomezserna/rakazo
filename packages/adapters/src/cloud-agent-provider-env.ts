@@ -13,6 +13,15 @@ export function resolveCloudAgentProvider(source: NodeJS.ProcessEnv = process.en
       ? "cursor"
       : "none";
   }
+  if (requested === "codex" || requested === "codex-server") {
+    return optional(source.CLOUD_AGENT_SPACE_ID) &&
+      optional(source.CODEX_SERVER_HOST) &&
+      optional(source.CODEX_SERVER_USER) &&
+      optional(source.CODEX_SSH_KEY_PATH) &&
+      optional(source.CODEX_SSH_KEY_FINGERPRINT)
+      ? "codex-server"
+      : "none";
+  }
   // Soft-fall: do not throw at API boot for typos / future vendor names.
   return "none";
 }

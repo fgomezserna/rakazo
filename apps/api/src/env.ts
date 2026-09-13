@@ -35,6 +35,13 @@ export interface AppEnv {
   cloudAgentProvider: string;
   cloudAgentSpaceId: string | undefined;
   cursorApiKey: string | undefined;
+  codexServerHost: string | undefined;
+  codexServerUser: string | undefined;
+  codexServerPort: string | undefined;
+  codexSshKeyPath: string | undefined;
+  codexSshKeyFingerprint: string | undefined;
+  codexServerKnownHostsPath: string | undefined;
+  codexSshTimeoutMs: string | undefined;
   agentRuntime: string;
   deploymentModelKey: string | undefined;
   e2bApiKey: string | undefined;
@@ -122,6 +129,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     cloudAgentProvider,
     cloudAgentSpaceId: optional(source.CLOUD_AGENT_SPACE_ID),
     cursorApiKey: optional(source.CURSOR_API_KEY),
+    codexServerHost: optional(source.CODEX_SERVER_HOST),
+    codexServerUser: optional(source.CODEX_SERVER_USER),
+    codexServerPort: optional(source.CODEX_SERVER_PORT),
+    codexSshKeyPath: optional(source.CODEX_SSH_KEY_PATH),
+    codexSshKeyFingerprint: optional(source.CODEX_SSH_KEY_FINGERPRINT),
+    codexServerKnownHostsPath: optional(source.CODEX_SERVER_KNOWN_HOSTS_PATH),
+    codexSshTimeoutMs: optional(source.CODEX_SSH_TIMEOUT_MS),
     agentRuntime: source.AGENT_RUNTIME ?? "pi",
     // Provider, model and key resolve together: see resolveDeploymentModel.
     deploymentModelKey: deploymentModel.key,

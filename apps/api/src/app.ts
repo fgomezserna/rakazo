@@ -329,6 +329,13 @@ export async function createApp(
     CLOUD_AGENT_PROVIDER: env.cloudAgentProvider,
     CURSOR_API_KEY: env.cursorApiKey,
     CLOUD_AGENT_SPACE_ID: env.cloudAgentSpaceId,
+    CODEX_SERVER_HOST: env.codexServerHost,
+    CODEX_SERVER_USER: env.codexServerUser,
+    CODEX_SERVER_PORT: env.codexServerPort,
+    CODEX_SSH_KEY_PATH: env.codexSshKeyPath,
+    CODEX_SSH_KEY_FINGERPRINT: env.codexSshKeyFingerprint,
+    CODEX_SERVER_KNOWN_HOSTS_PATH: env.codexServerKnownHostsPath,
+    CODEX_SSH_TIMEOUT_MS: env.codexSshTimeoutMs,
   });
   const shutdown = new AbortController();
   const executor = createRunExecutor({
