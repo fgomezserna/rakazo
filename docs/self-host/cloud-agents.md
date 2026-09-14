@@ -37,9 +37,12 @@ under `/srv/rakazo-bridge/jobs/<id>` and runs `codex exec` on a per-operation
 branch. When the repository is private on GitHub, the checkout uses the Codex
 LXC's existing `gh` login through a one-shot Git credential helper; tokens are
 never sent by the bot, placed in the clone URL, or written to job files.
+The Codex process keeps the `workspace-write` filesystem boundary but enables
+its sandbox network policy so `gh`, GitHub API calls, and other repository
+workflows work from inside the agent as well as during the initial checkout.
 No-repository launches are not supported by this provider. `openPr` is
-intentionally not advertised as a server-side guarantee; push/PR credentials
-must be added as a separate, approval-gated integration.
+intentionally not advertised as a server-side guarantee: the bridge does not
+open a PR on its own, and a task must explicitly request any push or PR action.
 
 The bridge returns the final Codex response from `last-message-<run>.txt` when
 the run is terminal. `cloud_agent_status` reads that response through the

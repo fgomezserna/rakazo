@@ -282,6 +282,11 @@ def run_worker(operation_id: str) -> None:
             "never",
             "-s",
             "workspace-write",
+            # Keep the filesystem boundary while allowing normal coding
+            # workflows (private GitHub fetches, tests that use services, and
+            # explicit pushes/PRs) to reach the network from the sandbox.
+            "-c",
+            "sandbox_workspace_write.network_access=true",
             "exec",
             "--json",
             "-C",
