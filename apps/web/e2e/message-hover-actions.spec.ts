@@ -258,8 +258,15 @@ test("message hover shows beside-bubble actions; reply links to parent", async (
 
   await page.setViewportSize({ width: 390, height: 844 });
   await botRow.scrollIntoViewIfNeeded();
-  await revealHoverRail(botRow);
   const mobileBotBubble = botRow.getByTestId("message-bot-bubble").first();
+  const compactBotFrame = botRow.getByTestId("message-bubble-frame");
+  await expectRailAtRest(page, botRow);
+  const compactBotRowBox = await botRow.boundingBox();
+  const compactBotFrameBox = await compactBotFrame.boundingBox();
+  expect(compactBotRowBox).not.toBeNull();
+  expect(compactBotFrameBox).not.toBeNull();
+  expect(compactBotRowBox!.height - compactBotFrameBox!.height).toBeLessThan(8);
+  await revealHoverRail(botRow);
   await expect
     .poll(async () => {
       const mobileRailBox = await botRail.boundingBox();

@@ -44,28 +44,46 @@ body,
 
 /* A narrow viewport wins over pointer capabilities: some mobile browsers report a fine pointer. */
 @media (max-width: 767px) {
-  .rk-message-hover-rail {
-    position: static !important;
-    inset: auto !important;
-    inset-inline-start: auto !important;
-    inset-inline-end: auto !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    left: auto !important;
-    width: 100% !important;
-    margin: 0 !important;
-    margin-inline-start: 0 !important;
-    margin-inline-end: 0 !important;
-    transform: none !important;
-  }
-
   .rk-message-bubble-frame[data-message-role="user"] {
-    max-width: 70% !important;
+    max-width: 70%;
   }
 
   .rk-message-bubble-frame[data-message-role="bot"] {
-    max-width: 74% !important;
+    max-width: 74%;
+  }
+}
+
+/* On narrow fine-pointer screens, reserve the rail only while its message is active. */
+@media (max-width: 767px) and (hover: hover) and (pointer: fine) {
+  .rk-message-row {
+    padding-bottom: 0;
+    transition: padding-bottom 160ms ease-out;
+  }
+
+  .rk-message-row:hover,
+  .rk-message-row:focus-within,
+  .rk-message-row:has(.rk-message-hover-rail[data-pinned="true"]) {
+    padding-bottom: 1.875rem;
+  }
+
+  .rk-message-hover-rail {
+    position: absolute;
+    inset-inline-start: auto;
+    inset-inline-end: auto;
+    top: calc(100% + 2px);
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: 100%;
+    margin: 0;
+    transform: none;
+    padding-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rk-message-row {
+    transition: none;
   }
 }
 

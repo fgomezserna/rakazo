@@ -4798,7 +4798,9 @@ const Transcript = memo(function Transcript({
             <div
               key={message.id}
               data-message-id={message.id}
-              className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-20"}
+              className={
+                peerReceipt ? "relative py-0.5" : "rk-message-row group/message relative hover:z-20"
+              }
             >
               {!peerReceipt && !message.id.startsWith("progress:") ? (
                 <time
