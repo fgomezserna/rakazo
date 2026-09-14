@@ -563,7 +563,8 @@ export const builtinAgentTools: ConnectorTool[] = [
         prompt: { type: "string", description: "Task for the remote agent." },
         repository: {
           type: "string",
-          description: "Git repository URL (optional for no-repo agents).",
+          description:
+            "HTTPS Git repository URL. Required by the self-hosted Codex provider; optional only for providers that explicitly support no-repo runs.",
         },
         openPr: {
           type: "boolean",

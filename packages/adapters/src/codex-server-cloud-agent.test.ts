@@ -80,4 +80,20 @@ describe("CodexServerCloudAgentProvider", () => {
       ),
     ).rejects.toBeInstanceOf(CloudAgentRequestRejected);
   });
+
+  it("requires a repository for self-hosted Codex launches", async () => {
+    const provider = new CodexServerCloudAgentProvider({
+      host: "codex-server",
+      user: "codex",
+      keyPath: "/run/secrets/key",
+      runCommand: vi.fn(),
+    });
+
+    await expect(
+      provider.launch(
+        { idempotencyKey: "operation-4", prompt: "Reply with exactly: ok" },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(CloudAgentRequestRejected);
+  });
 });

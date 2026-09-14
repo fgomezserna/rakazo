@@ -34,8 +34,12 @@ encoded by the worker and repository URLs must be HTTPS without credentials.
 Launches require an explicit repository URL. The bridge clones a known local
 repository when available, otherwise it creates an isolated shallow checkout
 under `/srv/rakazo-bridge/jobs/<id>` and runs `codex exec` on a per-operation
-branch. `openPr` is intentionally not advertised as a server-side guarantee;
-push/PR credentials must be added as a separate, approval-gated integration.
+branch. When the repository is private on GitHub, the checkout uses the Codex
+LXC's existing `gh` login through a one-shot Git credential helper; tokens are
+never sent by the bot, placed in the clone URL, or written to job files.
+No-repository launches are not supported by this provider. `openPr` is
+intentionally not advertised as a server-side guarantee; push/PR credentials
+must be added as a separate, approval-gated integration.
 
 Rotate the key by stopping or finishing active Codex operations, installing the
 new public key and worker secret, then restarting the worker. The connection

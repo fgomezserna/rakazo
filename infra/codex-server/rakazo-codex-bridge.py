@@ -31,6 +31,7 @@ MAX_PROMPT_BYTES = 100_000
 MAX_REPOSITORY_BYTES = 2_000
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+GIT_AUTH_HELPER = "!/usr/bin/gh auth git-credential"
 
 
 def die(message: str, code: int = 2) -> None:
@@ -137,7 +138,18 @@ def prepare_repository(job: Path, repository: str) -> tuple[Path, str]:
     if source is not None:
         command = ["/usr/bin/git", "clone", "--local", str(source), str(target)]
     else:
-        command = ["/usr/bin/git", "clone", "--depth=1", repository, str(target)]
+        # Use the Codex LXC's existing gh login only for this subprocess.  The
+        # helper never writes credentials into the clone URL or into the job
+        # files, and the bot/worker never receives the token.
+        command = [
+            "/usr/bin/git",
+            "-c",
+            f"credential.helper={GIT_AUTH_HELPER}",
+            "clone",
+            "--depth=1",
+            repository,
+            str(target),
+        ]
     with clone_log.open("wb") as log:
         result = subprocess.run(
             command,
@@ -207,26 +219,33 @@ def run_worker(operation_id: str) -> None:
     output_path = job / f"events-{run_id}.jsonl"
     stderr_path = job / f"stderr-{run_id}.log"
     last_message = job / f"last-message-{run_id}.txt"
-    command = [
-        "/usr/bin/codex",
-        "-a",
-        "never",
-        "-s",
-        "workspace-write",
-        "exec",
-        "--json",
-        "-C",
-        str(state["repo"]),
-        "-o",
-        str(last_message),
-    ]
-    environment = {
-        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "CODEX_HOME": str(CODEX_HOME),
-        "HOME": "/home/codex",
-        "LANG": "C.UTF-8",
-    }
     try:
+        repository_path = state.get("repo")
+        if (
+            not isinstance(repository_path, str)
+            or not repository_path
+            or not Path(repository_path).is_dir()
+        ):
+            raise RuntimeError("repository checkout unavailable")
+        command = [
+            "/usr/bin/codex",
+            "-a",
+            "never",
+            "-s",
+            "workspace-write",
+            "exec",
+            "--json",
+            "-C",
+            repository_path,
+            "-o",
+            str(last_message),
+        ]
+        environment = {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "CODEX_HOME": str(CODEX_HOME),
+            "HOME": "/home/codex",
+            "LANG": "C.UTF-8",
+        }
         with prompt_path.open("rb") as prompt, output_path.open("wb") as output, stderr_path.open(
             "wb"
         ) as stderr:
@@ -236,7 +255,7 @@ def run_worker(operation_id: str) -> None:
                 stdout=output,
                 stderr=stderr,
                 env=environment,
-                cwd=str(state["repo"]),
+                cwd=repository_path,
                 check=False,
             )
         state = read_json(metadata_path(job))
@@ -299,7 +318,16 @@ def launch(operation_id: str, prompt: str, repository: str) -> None:
         "created_at": int(time.time()),
     }
     write_json(metadata_path(job), state)
-    repo, branch = prepare_repository(job, repository)
+    try:
+        repo, branch = prepare_repository(job, repository)
+    except SystemExit:
+        state.update({"status": "failed", "exit_code": 1, "finished_at": int(time.time())})
+        write_json(metadata_path(job), state)
+        raise
+    except Exception:
+        state.update({"status": "failed", "exit_code": 1, "finished_at": int(time.time())})
+        write_json(metadata_path(job), state)
+        raise
     state["repo"] = str(repo)
     state["branch"] = branch
     start_run(job, state, prompt)
@@ -324,6 +352,13 @@ def reply(operation_id: str, prompt: str) -> None:
         die("unknown operation", 2)
     if current_status(state) == "running":
         die("operation is still running", 2)
+    repository_path = state.get("repo")
+    if (
+        not isinstance(repository_path, str)
+        or not repository_path
+        or not Path(repository_path).is_dir()
+    ):
+        die("repository checkout unavailable", 2)
     state["cancel_requested"] = False
     start_run(job, state, prompt)
     response(state)
