@@ -371,7 +371,19 @@ test.describe("touch message actions", () => {
       .filter({ has: botText })
       .first();
     const rail = row.getByTestId("message-hover-rail");
+    const bubble = row.getByTestId("message-bot-bubble").first();
     await expect(rail).toHaveCSS("opacity", "1");
+    await expect
+      .poll(async () => {
+        const railBox = await rail.boundingBox();
+        const bubbleBox = await bubble.boundingBox();
+        if (!railBox || !bubbleBox) return null;
+        return {
+          below: railBox.y >= bubbleBox.y + bubbleBox.height - 1,
+          aligned: Math.abs(railBox.x - bubbleBox.x) < 2,
+        };
+      })
+      .toEqual({ below: true, aligned: true });
     await expect(rail.getByRole("button", { name: "Reply", exact: true })).toBeHidden();
     await rail.getByRole("button", { name: "React", exact: true }).tap();
     await expect(page.getByRole("button", { name: "🎉", exact: true })).toBeVisible();

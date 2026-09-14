@@ -4827,21 +4827,13 @@ const Transcript = memo(function Transcript({
                   className={
                     peerReceipt
                       ? undefined
-                      : `relative w-fit min-w-0 ${
+                      : `relative flex w-fit min-w-0 flex-col items-start ${
                           message.role === "user"
-                            ? "max-w-[min(70%,calc(100%_-_6rem))]"
-                            : "max-w-[min(74%,calc(100%_-_6rem))]"
+                            ? "max-w-[70%] [@media(hover:hover)_and_(pointer:fine)]:max-w-[min(70%,calc(100%_-_6rem))]"
+                            : "max-w-[74%] [@media(hover:hover)_and_(pointer:fine)]:max-w-[min(74%,calc(100%_-_6rem))]"
                         }`
                   }
                 >
-                  {peerReceipt ? null : (
-                    <MessageHoverActions
-                      message={message}
-                      side={message.role === "user" ? "start" : "end"}
-                      onReply={onReply}
-                      onReact={onReact}
-                    />
-                  )}
                   <MessageView
                     artifactTarget={artifactTarget}
                     message={message}
@@ -4872,6 +4864,14 @@ const Transcript = memo(function Transcript({
                     speaking={speakingMessageId === message.id}
                     onSpeak={() => onSpeak(message)}
                   />
+                  {peerReceipt ? null : (
+                    <MessageHoverActions
+                      message={message}
+                      side={message.role === "user" ? "start" : "end"}
+                      onReply={onReply}
+                      onReact={onReact}
+                    />
+                  )}
                 </div>
               </div>
               {!peerReceipt && messageReactions ? (
