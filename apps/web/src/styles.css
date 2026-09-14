@@ -42,6 +42,33 @@ body,
   -webkit-app-region: no-drag;
 }
 
+/* A narrow viewport wins over pointer capabilities: some mobile browsers report a fine pointer. */
+@media (max-width: 767px) {
+  .rk-message-hover-rail {
+    position: static !important;
+    inset: auto !important;
+    inset-inline-start: auto !important;
+    inset-inline-end: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    margin: 0 !important;
+    margin-inline-start: 0 !important;
+    margin-inline-end: 0 !important;
+    transform: none !important;
+  }
+
+  .rk-message-bubble-frame[data-message-role="user"] {
+    max-width: 70% !important;
+  }
+
+  .rk-message-bubble-frame[data-message-role="bot"] {
+    max-width: 74% !important;
+  }
+}
+
 @keyframes rkPulse {
   0%,
   100% {

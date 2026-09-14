@@ -17,7 +17,7 @@ export function MessageHoverMetadata({
   return (
     <div
       data-testid="message-hover-rail"
-      className={`z-10 flex w-full items-center pt-0.5 transition-opacity ${reveal} [@media(hover:hover)_and_(pointer:fine)]:absolute [@media(hover:hover)_and_(pointer:fine)]:top-1/2 [@media(hover:hover)_and_(pointer:fine)]:w-auto [@media(hover:hover)_and_(pointer:fine)]:-translate-y-1/2 ${
+      className={`rk-message-hover-rail z-10 flex w-full items-center pt-0.5 transition-opacity ${reveal} [@media(hover:hover)_and_(pointer:fine)]:absolute [@media(hover:hover)_and_(pointer:fine)]:top-1/2 [@media(hover:hover)_and_(pointer:fine)]:w-auto [@media(hover:hover)_and_(pointer:fine)]:-translate-y-1/2 ${
         side === "end"
           ? "justify-start [@media(hover:hover)_and_(pointer:fine)]:start-full [@media(hover:hover)_and_(pointer:fine)]:ms-1"
           : "justify-end [@media(hover:hover)_and_(pointer:fine)]:end-full [@media(hover:hover)_and_(pointer:fine)]:me-1"

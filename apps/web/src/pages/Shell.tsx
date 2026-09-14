@@ -4824,10 +4824,11 @@ const Transcript = memo(function Transcript({
               >
                 <div
                   data-testid={peerReceipt ? undefined : "message-bubble-frame"}
+                  data-message-role={peerReceipt ? undefined : message.role}
                   className={
                     peerReceipt
                       ? undefined
-                      : `relative flex w-fit min-w-0 flex-col items-start ${
+                      : `rk-message-bubble-frame relative flex w-fit min-w-0 flex-col items-start ${
                           message.role === "user"
                             ? "max-w-[70%] [@media(hover:hover)_and_(pointer:fine)]:max-w-[min(70%,calc(100%_-_6rem))]"
                             : "max-w-[74%] [@media(hover:hover)_and_(pointer:fine)]:max-w-[min(74%,calc(100%_-_6rem))]"

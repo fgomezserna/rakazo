@@ -259,6 +259,18 @@ test("message hover shows beside-bubble actions; reply links to parent", async (
   await page.setViewportSize({ width: 390, height: 844 });
   await botRow.scrollIntoViewIfNeeded();
   await revealHoverRail(botRow);
+  const mobileBotBubble = botRow.getByTestId("message-bot-bubble").first();
+  await expect
+    .poll(async () => {
+      const mobileRailBox = await botRail.boundingBox();
+      const mobileBubbleBox = await mobileBotBubble.boundingBox();
+      if (!mobileRailBox || !mobileBubbleBox) return null;
+      return {
+        below: mobileRailBox.y >= mobileBubbleBox.y + mobileBubbleBox.height - 1,
+        aligned: Math.abs(mobileRailBox.x - mobileBubbleBox.x) < 2,
+      };
+    })
+    .toEqual({ below: true, aligned: true });
   await captureScreenshot(page, testInfo, "message-bot-actions-mobile");
   await parentRow.scrollIntoViewIfNeeded();
   await revealHoverRail(parentRow);
