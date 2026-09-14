@@ -63,14 +63,14 @@ body,
   .rk-message-row:hover,
   .rk-message-row:focus-within,
   .rk-message-row:has(.rk-message-hover-rail[data-pinned="true"]) {
-    padding-bottom: 2.125rem;
+    padding-bottom: 2.3125rem;
   }
 
   .rk-message-hover-rail {
     position: absolute;
     inset-inline-start: auto;
     inset-inline-end: auto;
-    top: calc(100% + 6px);
+    top: calc(100% + 9px);
     right: auto;
     bottom: auto;
     left: auto;

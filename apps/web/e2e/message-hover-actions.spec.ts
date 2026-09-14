@@ -275,7 +275,7 @@ test("message hover shows beside-bubble actions; reply links to parent", async (
       const verticalGap = mobileRailBox.y - (mobileBubbleBox.y + mobileBubbleBox.height);
       const horizontalOffset = mobileRailBox.x - mobileBubbleBox.x;
       return {
-        below: verticalGap >= 4 && verticalGap < 9,
+        below: verticalGap >= 7 && verticalGap < 12,
         offset: horizontalOffset >= 3 && horizontalOffset < 9,
       };
     })
