@@ -272,12 +272,14 @@ test("message hover shows beside-bubble actions; reply links to parent", async (
       const mobileRailBox = await botRail.boundingBox();
       const mobileBubbleBox = await mobileBotBubble.boundingBox();
       if (!mobileRailBox || !mobileBubbleBox) return null;
+      const verticalGap = mobileRailBox.y - (mobileBubbleBox.y + mobileBubbleBox.height);
+      const horizontalOffset = mobileRailBox.x - mobileBubbleBox.x;
       return {
-        below: mobileRailBox.y >= mobileBubbleBox.y + mobileBubbleBox.height - 1,
-        aligned: Math.abs(mobileRailBox.x - mobileBubbleBox.x) < 2,
+        below: verticalGap >= 4 && verticalGap < 9,
+        offset: horizontalOffset >= 3 && horizontalOffset < 9,
       };
     })
-    .toEqual({ below: true, aligned: true });
+    .toEqual({ below: true, offset: true });
   await captureScreenshot(page, testInfo, "message-bot-actions-mobile");
   await parentRow.scrollIntoViewIfNeeded();
   await revealHoverRail(parentRow);
