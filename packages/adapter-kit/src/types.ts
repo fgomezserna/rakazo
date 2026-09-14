@@ -793,6 +793,8 @@ export interface CloudAgentHandle {
   status: CloudAgentStatus;
   /** Latest remote run id when the vendor exposes one (needed for cancel). */
   latestRunId?: string;
+  /** Final provider response when a launch/reply completes synchronously. */
+  result?: string;
 }
 
 export interface CloudAgentSnapshot {
@@ -803,6 +805,8 @@ export interface CloudAgentSnapshot {
   branch?: string;
   prUrl?: string;
   latestRunId?: string;
+  /** Final provider response, when the provider exposes one. */
+  result?: string;
 }
 
 export interface CloudAgentReplyRequest {

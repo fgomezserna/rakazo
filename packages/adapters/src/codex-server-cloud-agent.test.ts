@@ -81,6 +81,31 @@ describe("CodexServerCloudAgentProvider", () => {
     ).rejects.toBeInstanceOf(CloudAgentRequestRejected);
   });
 
+  it("returns the sanitized final response through status", async () => {
+    const runCommand = vi.fn(async () =>
+      JSON.stringify({
+        id: "operation-result",
+        title: "Inspect login",
+        status: "finished",
+        latestRunId: "run-result",
+        branch: "rakazo/operation-result",
+        result:
+          "Logged in as fgomezserna\nrepositories: private-one, private-two\nBearer super-token",
+      }),
+    );
+    const provider = new CodexServerCloudAgentProvider({
+      host: "codex-server",
+      user: "codex",
+      keyPath: "/run/secrets/key",
+      runCommand,
+    });
+
+    await expect(provider.get("operation-result", context, "run-result")).resolves.toMatchObject({
+      status: "finished",
+      result: "Logged in as fgomezserna\nrepositories: private-one, private-two\nBearer [redacted]",
+    });
+  });
+
   it("requires a repository for self-hosted Codex launches", async () => {
     const provider = new CodexServerCloudAgentProvider({
       host: "codex-server",

@@ -41,6 +41,11 @@ No-repository launches are not supported by this provider. `openPr` is
 intentionally not advertised as a server-side guarantee; push/PR credentials
 must be added as a separate, approval-gated integration.
 
+The bridge returns the final Codex response from `last-message-<run>.txt` when
+the run is terminal. `cloud_agent_status` reads that response through the
+provider, bounded and with common credential forms redacted, so the requesting
+bot can summarize the remote work instead of relying on the compact card.
+
 Rotate the key by stopping or finishing active Codex operations, installing the
 new public key and worker secret, then restarting the worker. The connection
 fingerprint is part of the persisted provider binding, so a changed key fails

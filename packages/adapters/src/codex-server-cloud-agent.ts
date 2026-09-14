@@ -17,6 +17,7 @@ const OPERATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const DEFAULT_KNOWN_HOSTS = "/run/secrets/codex_server_known_hosts";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
+const MAX_RESULT_BYTES = 100_000;
 
 export interface CodexServerCloudAgentOptions {
   host: string;
@@ -170,6 +171,7 @@ interface BridgeResponse {
   status?: unknown;
   latestRunId?: unknown;
   branch?: unknown;
+  result?: unknown;
 }
 
 function toHandle(response: BridgeResponse, fallbackId: string, prompt: string): CloudAgentHandle {
@@ -198,6 +200,7 @@ function toSnapshot(
   const latestRunId = typeof response.latestRunId === "string" ? response.latestRunId : undefined;
   const branch =
     typeof response.branch === "string" && response.branch ? response.branch : undefined;
+  const result = normalizeResult(response.result);
   return {
     id,
     title,
@@ -205,7 +208,27 @@ function toSnapshot(
     url: `https://codex-server.local/rakazo/agents/${encodeURIComponent(id)}`,
     ...(latestRunId ? { latestRunId } : {}),
     ...(branch ? { branch } : {}),
+    ...(result ? { result } : {}),
   };
+}
+
+function normalizeResult(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  const sanitized = value
+    .replace(/gh(?:p|o|s|r|u)_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+/g, "[redacted]")
+    .replace(/Bearer\s+[^\s"',;&]+/gi, "Bearer [redacted]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(
+      /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+      "[redacted private key]",
+    )
+    .replace(
+      /((?:api[_-]?key|access[_-]?token|password|secret|token|authorization|auth)\s*[=:]\s*)[^\s"',;&]+/gi,
+      "$1[redacted]",
+    );
+  if (!sanitized) return undefined;
+  if (Buffer.byteLength(sanitized, "utf8") <= MAX_RESULT_BYTES) return sanitized;
+  return `${Buffer.from(sanitized, "utf8").subarray(0, MAX_RESULT_BYTES).toString("utf8")}\n[output truncated]`;
 }
 
 function validateOperationId(value: string): string {

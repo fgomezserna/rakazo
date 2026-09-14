@@ -1,6 +1,6 @@
-import type { AdapterContext, JobPublisher } from "@rakazo/adapter-kit";
+import type { AdapterContext, CloudAgentSnapshot, JobPublisher } from "@rakazo/adapter-kit";
 import { cloudAgentPollJob } from "@rakazo/adapter-kit";
-import { cloudAgentBlockFromPayload } from "@rakazo/core";
+import { cloudAgentBlockFromPayload, cloudAgentHttpsUrl } from "@rakazo/core";
 import {
   appendEventInTransaction,
   type CloudAgent,
@@ -105,6 +105,20 @@ export async function executeCloudAgentTool(
     });
     if (!owned) return { error: "Unknown cloud agent." };
     agent = owned;
+    if (name === "cloud_agent_status" && agent.remoteId) {
+      // Status is the explicit read channel for provider output. The durable
+      // card stays compact, while the provider can expose its final response
+      // (for example, a Codex command's report) to the requesting bot.
+      const snapshot = await connection.provider.get(
+        agent.remoteId,
+        context,
+        agent.latestRunId ?? undefined,
+      );
+      return {
+        ...cloudAgentToolSnapshot(snapshot),
+        ...(agent.cancelRequested ? { cancellationPending: true } : {}),
+      };
+    }
     if (name === "cloud_agent_reply") {
       if (
         agent.status === "running" ||
@@ -143,6 +157,19 @@ export async function executeCloudAgentTool(
     ...snapshot,
     ...(agent.cancelRequested ? { cancellationPending: true } : {}),
     ...(agent.followupDispatching ? { followupPending: true } : {}),
+  };
+}
+
+export function cloudAgentToolSnapshot(snapshot: CloudAgentSnapshot) {
+  return {
+    id: snapshot.id,
+    title: snapshot.title,
+    status: snapshot.status,
+    url: cloudAgentHttpsUrl(snapshot.url) ?? "",
+    ...(snapshot.branch ? { branch: snapshot.branch } : {}),
+    ...(snapshot.prUrl ? { prUrl: cloudAgentHttpsUrl(snapshot.prUrl) ?? "" } : {}),
+    ...(snapshot.latestRunId ? { latestRunId: snapshot.latestRunId } : {}),
+    ...(snapshot.result ? { result: snapshot.result } : {}),
   };
 }
 

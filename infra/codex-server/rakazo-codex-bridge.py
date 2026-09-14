@@ -29,6 +29,7 @@ BASE_DIR = Path("/srv/rakazo-bridge/jobs")
 CODEX_HOME = Path("/home/codex/.codex")
 MAX_PROMPT_BYTES = 100_000
 MAX_REPOSITORY_BYTES = 2_000
+MAX_RESULT_BYTES = 100_000
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 GIT_AUTH_HELPER = "!/usr/bin/gh auth git-credential"
@@ -197,10 +198,55 @@ def process_alive(state: dict[str, Any]) -> bool:
         return False
 
 
-def response(state: dict[str, Any]) -> None:
+def final_result(job: Path, state: dict[str, Any], status: str) -> str | None:
+    if status not in ("finished", "failed"):
+        return None
+    run_id = state.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    try:
+        raw = (job / f"last-message-{run_id}.txt").read_bytes()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    truncated = len(raw) > MAX_RESULT_BYTES
+    if truncated:
+        raw = raw[:MAX_RESULT_BYTES]
+    result = raw.decode("utf-8", errors="replace")
+    # The final response is intentionally returned to the authenticated worker,
+    # but never forward common credential forms if a task printed one by mistake.
+    result = re.sub(
+        r"gh(?:p|o|s|r|u)_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+",
+        "[redacted]",
+        result,
+    )
+    result = re.sub(r"Bearer\s+[^\s\"',;&]+", "Bearer [redacted]", result, flags=re.IGNORECASE)
+    result = re.sub(
+        r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+        "[redacted]",
+        result,
+    )
+    result = re.sub(
+        r"(-----BEGIN [^-]*PRIVATE KEY-----)[\s\S]*?(-----END [^-]*PRIVATE KEY-----)",
+        "[redacted private key]",
+        result,
+    )
+    result = re.sub(
+        r"((?:api[_-]?key|access[_-]?token|password|secret|token|authorization|auth)\s*[=:]\s*)[^\s\"',;&]+",
+        r"\1[redacted]",
+        result,
+        flags=re.IGNORECASE,
+    )
+    if truncated:
+        result += "\n[output truncated]"
+    return result
+
+
+def response(job: Path, state: dict[str, Any]) -> None:
     status = current_status(state)
     state["status"] = status
-    write_json(job_dir(str(state["id"])) / "metadata.json", state)
+    write_json(job / "metadata.json", state)
     payload = {
         "id": state["id"],
         "title": state["title"],
@@ -208,6 +254,9 @@ def response(state: dict[str, Any]) -> None:
         "latestRunId": state["run_id"],
         "branch": state.get("branch"),
     }
+    result = final_result(job, state, status)
+    if result is not None:
+        payload["result"] = result
     print(json.dumps(payload, separators=(",", ":")))
 
 
@@ -303,7 +352,7 @@ def launch(operation_id: str, prompt: str, repository: str) -> None:
         die("prompt is required", 2)
     job = job_dir(operation_id)
     if metadata_path(job).exists():
-        response(read_json(metadata_path(job)))
+        response(job, read_json(metadata_path(job)))
         return
     job.mkdir(mode=0o700, parents=True, exist_ok=False)
     title = prompt.splitlines()[0].strip()[:80] or "Codex task"
@@ -331,7 +380,7 @@ def launch(operation_id: str, prompt: str, repository: str) -> None:
     state["repo"] = str(repo)
     state["branch"] = branch
     start_run(job, state, prompt)
-    response(state)
+    response(job, state)
 
 
 def status(operation_id: str) -> None:
@@ -339,7 +388,7 @@ def status(operation_id: str) -> None:
     job = job_dir(operation_id)
     if not metadata_path(job).exists():
         die("unknown operation", 2)
-    response(read_json(metadata_path(job)))
+    response(job, read_json(metadata_path(job)))
 
 
 def reply(operation_id: str, prompt: str) -> None:
@@ -361,7 +410,7 @@ def reply(operation_id: str, prompt: str) -> None:
         die("repository checkout unavailable", 2)
     state["cancel_requested"] = False
     start_run(job, state, prompt)
-    response(state)
+    response(job, state)
 
 
 def cancel(operation_id: str) -> None:
@@ -379,7 +428,7 @@ def cancel(operation_id: str) -> None:
                 os.killpg(pid, signal.SIGTERM)
         except (OSError, ValueError, TypeError):
             pass
-    response(state)
+    response(job, state)
 
 
 def main() -> None:
