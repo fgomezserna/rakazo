@@ -34,6 +34,10 @@ import {
   OPENCODE_GO_PROVIDER_ID,
   resolveDeploymentModel,
 } from "./deployment-model.js";
+import {
+  normalizeOpenAiToolParameters,
+  openAiToolParametersNeedNormalization,
+} from "./openai-tool-parameters.js";
 import { PiRuntimeCredentialStore, toOAuthCredential } from "./pi-credentials.js";
 import { registerLocalProvider } from "./pi-local-provider.js";
 import {
@@ -1126,8 +1130,15 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   }
 }
 
-function parametersFor(tool: ConnectorTool) {
-  return builtinParameters(tool) ?? safeJsonSchemaParameters(tool);
+/** Build AgentTool.parameters for a connector tool, including OpenAI wire fidelity. */
+export function parametersFor(tool: ConnectorTool) {
+  const schema = builtinParameters(tool) ?? safeJsonSchemaParameters(tool);
+  // Type.Union (top-level oneOf/anyOf) serializes without type/properties.
+  // Re-wrap only when needed so complete Type.Object schemas keep their metadata.
+  if (!openAiToolParametersNeedNormalization(schema)) return schema;
+  return Type.Unsafe(
+    normalizeOpenAiToolParameters(JSON.parse(JSON.stringify(schema))),
+  ) as unknown as ReturnType<typeof Type.Object>;
 }
 
 /** A remote MCP server controls its own schemas, so a shape TypeBox cannot express must
