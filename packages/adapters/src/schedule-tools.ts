@@ -82,6 +82,15 @@ export function resolveScheduleTiming(
       error: "Provide either a repeating schedule or a one-shot time, not both.",
     };
   }
+  if (
+    isScheduleValueProvided(input.cron) &&
+    (isScheduleValueProvided(input.every) || isScheduleValueProvided(input.unit))
+  ) {
+    return {
+      ok: false,
+      error: "Provide either cron or every/unit, not both.",
+    };
+  }
   if (!hasRepeat && !hasOneShot) {
     return {
       ok: false,

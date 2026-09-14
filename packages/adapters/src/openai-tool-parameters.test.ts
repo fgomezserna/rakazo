@@ -96,7 +96,7 @@ describe("parametersFor OpenAI wire fidelity", () => {
     expect(wire.properties).toEqual({});
   });
 
-  it("serializes schedule_create with an object envelope and all timing branches", () => {
+  it("serializes schedule_create as a flat object for OpenAI-compatible models", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "schedule_create");
     if (!tool) throw new Error("missing schedule_create");
     const wire = JSON.parse(JSON.stringify(parametersFor(tool))) as {
@@ -104,10 +104,23 @@ describe("parametersFor OpenAI wire fidelity", () => {
       properties?: unknown;
       anyOf?: unknown[];
       oneOf?: unknown[];
+      required?: unknown[];
     };
     expect(wire.type).toBe("object");
-    expect(wire.properties).toEqual({});
-    expect((wire.anyOf ?? wire.oneOf ?? []).length).toBe(5);
+    expect(Object.keys((wire.properties ?? {}) as Record<string, unknown>)).toEqual([
+      "name",
+      "prompt",
+      "timezone",
+      "cron",
+      "every",
+      "unit",
+      "runAt",
+      "delayMinutes",
+      "delaySeconds",
+    ]);
+    expect(wire.required).toEqual(["name", "prompt"]);
+    expect(wire.anyOf).toBeUndefined();
+    expect(wire.oneOf).toBeUndefined();
   });
 
   it("keeps every schedule timing mode valid after wire normalization", () => {
@@ -144,14 +157,17 @@ describe("parametersFor OpenAI wire fidelity", () => {
         arguments: {},
       }),
     ).toThrow();
-    expect(() =>
+    // The model-facing schema keeps all timing fields visible so providers can
+    // select one. Exact-one enforcement remains in resolveScheduleTiming before
+    // persistence.
+    expect(
       validateToolArguments(tool, {
         type: "toolCall",
         id: "schedule-mixed",
         name: source.name,
         arguments: { ...common, cron: "0 10 * * 1-5", delayMinutes: 15 },
       }),
-    ).toThrow();
+    ).toMatchObject({ ...common, cron: "0 10 * * 1-5", delayMinutes: 15 });
   });
 
   it("serializes request_secret unions with an object envelope", () => {

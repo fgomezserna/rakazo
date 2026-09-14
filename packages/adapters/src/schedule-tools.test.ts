@@ -87,6 +87,17 @@ describe("resolveScheduleTiming", () => {
     });
   });
 
+  it("rejects mixing cron with interval fields", () => {
+    expect(resolveScheduleTiming({ cron: "0 9 * * *", every: 30, unit: "minutes" })).toEqual({
+      ok: false,
+      error: "Provide either cron or every/unit, not both.",
+    });
+    expect(resolveScheduleTiming({ cron: "0 9 * * *", unit: "minutes" })).toEqual({
+      ok: false,
+      error: "Provide either cron or every/unit, not both.",
+    });
+  });
+
   it("ignores null and empty optional fields from model serializers", () => {
     const repeating = resolveScheduleTiming({
       cron: "0 9 * * *",
@@ -194,6 +205,28 @@ describe("isOneShotRoutineCron", () => {
 });
 
 describe("schedule tool persistence", () => {
+  it("does not persist a routine when repeat modes are mixed", async () => {
+    const create = vi.fn(async () => ({ id: "routine-1" }));
+    const deps = {
+      prisma: { routine: { create } },
+      events: { append: vi.fn(async () => undefined) },
+      jobs: { enqueue: vi.fn(async () => undefined) },
+    } as unknown as Parameters<typeof createScheduleFromTool>[0];
+
+    const result = await createScheduleFromTool(deps, {
+      spaceId: "ws-1",
+      botId: "bot-1",
+      userId: "user-1",
+      threadId: "thread-1",
+      name: "Morning joke",
+      prompt: "Tell a joke",
+      schedule: { cron: "0 9 * * *", every: 30, unit: "minutes" },
+    });
+
+    expect(result).toEqual({ error: "Provide either cron or every/unit, not both." });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("creates routines with routine.created and enqueues wakeup", async () => {
     const append = vi.fn(async () => undefined);
     const enqueue = vi.fn(async () => undefined);

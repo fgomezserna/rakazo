@@ -18,7 +18,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "capture_secret_from_clipboard",
 ]);
 
-const scheduleCreateProperties = {
+export const scheduleCreateProperties = {
   name: { type: "string", description: "Short label shown in Routines." },
   prompt: {
     type: "string",
@@ -26,7 +26,7 @@ const scheduleCreateProperties = {
       "Concrete steps for when the schedule fires: name the connected plugin tools to call (e.g. GITHUB_LIST_RELEASES for owner/repo), what to extract, and how to report. Prefer plugin tools over computer browser or web search for app data.",
   },
   timezone: { type: "string", description: "IANA timezone (default UTC)." },
-};
+} as const;
 
 /** Keep repeat and one-shot schedules mutually exclusive at the model boundary. */
 const scheduleCreateInputSchema = {
@@ -741,7 +741,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "schedule_create",
     description:
-      'Create a reminder or recurring job for this bot. Use for "remind me in 10 minutes" or "every morning send a joke". Repeats: cron or every/unit (min 1 minute). One-shot: runAt, delayMinutes, or delaySeconds.',
+      'Create a reminder or recurring job for this bot. Always provide name and prompt plus exactly one timing mode: cron, every+unit (minimum 1 minute), runAt, delayMinutes, or delaySeconds. Do not mix timing modes. Use for "remind me in 10 minutes" or "every morning send a joke".',
     inputSchema: scheduleCreateInputSchema,
   },
   {

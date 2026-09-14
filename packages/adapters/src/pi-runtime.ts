@@ -27,7 +27,11 @@ import type {
 } from "@rakazo/adapter-kit";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
-import { builtinAgentTools, DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
+import {
+  builtinAgentTools,
+  DELEGATION_TOOL_NAMES,
+  scheduleCreateProperties,
+} from "./builtin-tools.js";
 import {
   DEFAULT_DEPLOYMENT_PROVIDER,
   DEFAULT_OPENROUTER_MODEL_ID,
@@ -1153,6 +1157,42 @@ function safeJsonSchemaParameters(tool: ConnectorTool) {
 }
 
 function builtinParameters(tool: ConnectorTool) {
+  if (tool.name === "schedule_create") {
+    // Keep the canonical inputSchema exclusive for connector/catalog consumers,
+    // but expose a flat object to OpenAI-compatible models. OpenCode Go/DeepSeek
+    // treats a root oneOf with no properties as an empty tool and emits {}.
+    // createScheduleFromTool/resolveScheduleTiming still enforce exactly one
+    // timing mode before any routine is persisted.
+    return Type.Object(
+      {
+        name: Type.String({ description: scheduleCreateProperties.name.description }),
+        prompt: Type.String({ description: scheduleCreateProperties.prompt.description }),
+        timezone: Type.Optional(
+          Type.String({ description: scheduleCreateProperties.timezone.description }),
+        ),
+        cron: Type.Optional(Type.String({ description: "5-field cron for repeating schedules." })),
+        every: Type.Optional(
+          Type.Number({ description: "Repeat interval amount for repeating schedules." }),
+        ),
+        unit: Type.Optional(
+          Type.Union([Type.Literal("minutes"), Type.Literal("hours"), Type.Literal("days")], {
+            description: "Unit for every (minimum 1 minute).",
+          }),
+        ),
+        runAt: Type.Optional(Type.String({ description: "ISO datetime for a one-shot schedule." })),
+        delayMinutes: Type.Optional(
+          Type.Number({ description: "Minutes from now for a one-shot schedule." }),
+        ),
+        delaySeconds: Type.Optional(
+          Type.Number({ description: "Seconds from now for a one-shot schedule." }),
+        ),
+      },
+      {
+        description:
+          "Include exactly one timing mode: cron, every+unit, runAt, delayMinutes, or delaySeconds.",
+      },
+    );
+  }
   if (tool.name === "write_file") {
     return Type.Object({ path: Type.String(), content: Type.String() });
   }
