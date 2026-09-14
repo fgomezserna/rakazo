@@ -5,6 +5,7 @@ import {
   delegateBotSecret,
   normalizeSecretDestination,
   requestWithBotSecret,
+  resolveSecretCaptureTarget,
 } from "./bot-secrets.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
@@ -177,6 +178,80 @@ describe("authenticated secret requests", () => {
     controller.abort();
     expect(await pending).toMatchObject({ error: expect.any(String) });
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("clipboard capture destinations", () => {
+  const source = { userId: "user-1", spaceId: "space-source", botId: "bot-source" };
+  const sourceBot = {
+    id: source.botId,
+    spaceId: source.spaceId,
+    space: { organizationId: "org-1" },
+  };
+  const targetBot = {
+    id: "bot-target",
+    name: "Comercial",
+    spaceId: "space-target",
+    thread: { id: "thread-target" },
+  };
+
+  function prismaFor(targets: Array<typeof targetBot> = [targetBot]) {
+    return {
+      bot: {
+        findFirst: vi.fn().mockResolvedValue(sourceBot),
+        findMany: vi.fn().mockResolvedValue(targets),
+      },
+    } as unknown as PrismaClient;
+  }
+
+  it("keeps the default capture on the current bot", async () => {
+    const result = await resolveSecretCaptureTarget({ prisma: prismaFor(), source });
+    expect(result).toEqual({ ok: true, target: { scope: source, botId: source.botId } });
+  });
+
+  it("resolves a same-organization bot by its exact name", async () => {
+    const result = await resolveSecretCaptureTarget({
+      prisma: prismaFor(),
+      source,
+      targetName: targetBot.name,
+    });
+    expect(result).toEqual({
+      ok: true,
+      target: {
+        scope: { userId: source.userId, spaceId: targetBot.spaceId, botId: targetBot.id },
+        botId: targetBot.id,
+        botName: targetBot.name,
+      },
+    });
+  });
+
+  it("rejects an ambiguous or cross-organization destination before capture", async () => {
+    const prisma = prismaFor([]);
+    const result = await resolveSecretCaptureTarget({
+      prisma,
+      source,
+      targetBotId: "bot-outside-org",
+    });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("target bot") });
+    expect(prisma.bot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: source.userId,
+          space: { organizationId: "org-1" },
+        }),
+      }),
+    );
+  });
+
+  it("does not allow two destination selectors", async () => {
+    await expect(
+      resolveSecretCaptureTarget({
+        prisma: prismaFor(),
+        source,
+        targetBotId: targetBot.id,
+        targetName: targetBot.name,
+      }),
+    ).resolves.toEqual({ ok: false, error: "Choose target_bot_id or target_name, not both." });
   });
 });
 

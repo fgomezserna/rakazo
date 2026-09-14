@@ -36,9 +36,9 @@ The model has no tool for reading saved credential values, and the backend remov
 
 ## Capture from a bot computer
 
-When a one-time token is already visible in a bot's computer, the bot may click the site's **Copy** control and then call `capture_secret_from_clipboard` with the exact credential destination. This is an explicit-approval action: the provider consumes and clears the computer's plain-text clipboard, the backend validates and encrypts the value, and the tool returns metadata only. The token is never placed in model input, chat, files, logs, shell command arguments or prompts. This is deliberately a one-shot credential capture, not a general clipboard-reading tool.
+When a one-time token is already visible in a bot's computer, the bot may click the site's **Copy** control and then call `capture_secret_from_clipboard` with the exact credential destination. By default it is saved for that bot; pass exactly one `target_bot_id` or `target_name` to save it directly for another active bot owned by the same user in the same organization, avoiding a second delegation step. This is an explicit-approval action: the provider consumes and clears the computer's plain-text clipboard, the backend validates and encrypts the value, and the tool returns metadata only. The token is never placed in model input, chat, files, logs, shell command arguments or prompts. This is deliberately a one-shot credential capture, not a general clipboard-reading tool.
 
-If the computer provider cannot capture its clipboard, use the protected `request_secret` card instead. After the credential is saved, use `delegate_secret` for an approved bot-to-bot transfer.
+If the computer provider cannot capture its clipboard, use the protected `request_secret` card instead. Use `delegate_secret` only when the credential was already saved on a bot and needs a separate approved bot-to-bot transfer.
 
 ## Explicit bot-to-bot transfer
 

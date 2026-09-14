@@ -340,7 +340,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "capture_secret_from_clipboard",
     description:
-      "Consume a credential copied to this bot's computer clipboard and save it as a named API credential. Use only after the user explicitly asked for this, the correct token is visible in the bot computer, and the copy action has completed. The action always requires user approval; the backend stores the value encrypted and returns only metadata, never the token. Do not ask the user to type or paste the token into chat, and do not use shell or file tools to read the clipboard.",
+      "Consume a credential copied to this bot's computer clipboard and save it as a named API credential. Use only after the user explicitly asked for this, the correct token is visible in the bot computer, and the copy action has completed. Omit target_bot_id and target_name to save it on this bot, or provide exactly one to save it directly on another active bot owned by the same user in the same organization. The action always requires user approval; the backend stores the value encrypted and returns only metadata, never the token. Do not ask the user to type or paste the token into chat, and do not use shell or file tools to read the clipboard.",
     inputSchema: {
       type: "object",
       properties: {
@@ -348,6 +348,14 @@ export const builtinAgentTools: ConnectorTool[] = [
         replace: {
           type: "boolean",
           description: "Replace an existing credential only after the user explicitly confirms.",
+        },
+        target_bot_id: {
+          type: "string",
+          description: "Exact id of the destination bot; do not send with target_name.",
+        },
+        target_name: {
+          type: "string",
+          description: "Exact current name of the destination bot when its id is unavailable.",
         },
       },
       required: ["credential"],

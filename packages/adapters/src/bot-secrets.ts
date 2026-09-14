@@ -109,6 +109,103 @@ export async function storeBotSecret(input: {
   }
 }
 
+type SecretCaptureTarget = {
+  scope: BotSecretScope;
+  botId: string;
+  botName?: string;
+};
+
+/**
+ * Resolve an optional destination for a one-shot clipboard capture.
+ *
+ * A capture normally belongs to the current bot. When a destination is
+ * supplied, keep the same explicit boundary as credential delegation: the
+ * target must be another active bot owned by the same user in the same
+ * organization. The token is still captured from the current bot's computer;
+ * only its encrypted storage scope changes.
+ */
+export async function resolveSecretCaptureTarget(input: {
+  prisma: PrismaClient;
+  source: BotSecretScope;
+  targetBotId?: string;
+  targetName?: string;
+}): Promise<{ ok: true; target: SecretCaptureTarget } | { ok: false; error: string }> {
+  const requestedTargetBotId = input.targetBotId?.trim() || undefined;
+  const requestedTargetName = input.targetName?.trim() || undefined;
+  if (requestedTargetBotId && requestedTargetName) {
+    return { ok: false, error: "Choose target_bot_id or target_name, not both." };
+  }
+  if (!requestedTargetBotId && !requestedTargetName) {
+    return { ok: true, target: { scope: input.source, botId: input.source.botId } };
+  }
+
+  const sourceBot = await input.prisma.bot.findFirst({
+    where: {
+      id: input.source.botId,
+      userId: input.source.userId,
+      spaceId: input.source.spaceId,
+      archivedAt: null,
+    },
+    select: { id: true, spaceId: true, space: { select: { organizationId: true } } },
+  });
+  if (!sourceBot) return { ok: false, error: "The source bot is unavailable." };
+
+  const targetBots = await input.prisma.bot.findMany({
+    where: {
+      ...(requestedTargetBotId ? { id: requestedTargetBotId } : {}),
+      userId: input.source.userId,
+      archivedAt: null,
+      space: { organizationId: sourceBot.space.organizationId },
+    },
+    select: {
+      id: true,
+      name: true,
+      spaceId: true,
+      thread: { select: { id: true } },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  const exactTargets = requestedTargetName
+    ? targetBots.filter((candidate) => candidate.name === requestedTargetName)
+    : [];
+  const caseInsensitiveTargets = requestedTargetName
+    ? targetBots.filter(
+        (candidate) => candidate.name.toLowerCase() === requestedTargetName.toLowerCase(),
+      )
+    : [];
+  const target = requestedTargetBotId
+    ? targetBots[0]
+    : exactTargets.length === 1
+      ? exactTargets[0]
+      : caseInsensitiveTargets.length === 1
+        ? caseInsensitiveTargets[0]
+        : undefined;
+  if (!target) {
+    return {
+      ok: false,
+      error: "Provide one exact target bot id or an unambiguous target bot name.",
+    };
+  }
+  if (target.id === input.source.botId) {
+    return { ok: false, error: "A bot cannot capture a credential to itself as a target." };
+  }
+  if (requestedTargetName && target.name !== requestedTargetName) {
+    return { ok: false, error: "target_name must exactly match the target bot name." };
+  }
+  if (!target.thread) {
+    return { ok: false, error: "The target bot has no chat to receive the credential." };
+  }
+
+  return {
+    ok: true,
+    target: {
+      scope: { userId: input.source.userId, spaceId: target.spaceId, botId: target.id },
+      botId: target.id,
+      botName: target.name,
+    },
+  };
+}
+
 /**
  * Copy a saved credential between two bots after an explicit user-approved tool
  * call. The value is decrypted and re-encrypted only inside the backend; it is

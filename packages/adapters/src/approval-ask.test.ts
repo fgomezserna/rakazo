@@ -121,4 +121,26 @@ describe("buildApprovalAskBlock", () => {
     });
     expect(JSON.stringify(block)).not.toContain("token-secret");
   });
+
+  it("shows the direct destination for clipboard capture", () => {
+    const block = buildApprovalAskBlock(
+      "effect-1",
+      "capture_secret_from_clipboard",
+      {
+        credential: {
+          name: "vanguard_api_key",
+          origin: "https://api.example.test",
+          auth: { type: "bearer" },
+        },
+        target_name: "Comercial",
+      },
+      [],
+    );
+
+    expect(block).toMatchObject({
+      kind: "ask",
+      text: "Review before capturing “vanguard_api_key” from this bot's computer clipboard for bot Comercial",
+      detail: expect.stringContaining("destination bot: Comercial"),
+    });
+  });
 });

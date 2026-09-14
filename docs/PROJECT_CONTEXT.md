@@ -110,11 +110,12 @@ The branch contains the following user-facing work, in chronological order:
   teammate directory and the web composer mention picker, while the target run,
   memory, credentials and computer remain in the owner's workspace. This is not
   a cross-user invitation or a direct proxy chat.
-- An explicit user-approved `delegate_secret` action is the exception for
-  credentials: it re-encrypts one named credential in the backend and creates an
-  independent copy in another bot owned by the same user and organization. The
-  secret value never travels through bot messages, model context, chat, files or
-  shell commands; sharing a bot alone does not grant credential access.
+- An explicit user-approved `delegate_secret` action, or a clipboard capture
+  with an explicit destination, is the exception for credentials: the backend
+  re-encrypts or stores one named credential in another bot owned by the same
+  user and organization. The secret value never travels through bot messages,
+  model context, chat, files or shell commands; sharing a bot alone does not
+  grant credential access.
 - `e6d563f6`: adds workspace profile configuration (name and avatar) with owner
   checks and web/mobile surfaces.
 - `65745ab2` through `5c2ff955`: harden the noVNC screen path: retry transient

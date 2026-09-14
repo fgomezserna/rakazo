@@ -180,6 +180,8 @@ describe("capture_secret_from_clipboard parameters", () => {
     expect(converted.type).toBe("object");
     expect(converted.required).toEqual(["credential"]);
     expect(converted.additionalProperties).toBe(false);
+    expect(converted.properties).toHaveProperty("target_bot_id");
+    expect(converted.properties).toHaveProperty("target_name");
     expect(converted.properties?.credential?.type).toBe("object");
     expect(converted.properties?.credential?.properties).toEqual(
       expect.objectContaining({

@@ -49,6 +49,7 @@ function fixture({
   autoReview = false,
   trigger = "user",
   capture = false,
+  captureTarget = false,
 } = {}) {
   const tool: ConnectorTool = {
     name,
@@ -74,6 +75,14 @@ function fixture({
     trigger,
     leaseFence: 0,
   };
+  const directTargetBot = captureTarget
+    ? {
+        id: "bot-target",
+        name: "Comercial",
+        spaceId: "space-target",
+        thread: { id: "thread-target" },
+      }
+    : undefined;
   const externalEffect = {
     findMany: vi.fn(async () => effects.filter((effect) => effect.status === "approved")),
     findUnique: vi.fn(
@@ -119,7 +128,12 @@ function fixture({
         computerId: "computer-1",
         computer: { id: "computer-1", scope: "dedicated" },
       })),
-      findMany: vi.fn(async () => []),
+      findFirst: vi.fn(async ({ where }: { where?: { id?: string } }) =>
+        captureTarget && where?.id === run.botId
+          ? { id: run.botId, spaceId: run.spaceId, space: { organizationId: "org-1" } }
+          : null,
+      ),
+      findMany: vi.fn(async () => (directTargetBot ? [directTargetBot] : [])),
     },
     attempt: {
       create: vi.fn(async () => ({ id: "attempt-1" })),
@@ -178,6 +192,13 @@ function fixture({
   prisma.$transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
     callback({
       $queryRaw: vi.fn(async () => []),
+      bot: {
+        findFirst: vi.fn(async () =>
+          directTargetBot
+            ? { id: directTargetBot.id, thread: { id: directTargetBot.thread.id } }
+            : null,
+        ),
+      },
       botSecret: {
         findFirst: vi.fn(async () => null),
         count: vi.fn(async () => 0),
@@ -443,5 +464,43 @@ describe("connector read-only metadata and approval enforcement", () => {
     expect(JSON.stringify(f.results)).not.toContain("clipboard-token");
     expect(JSON.stringify(f.effects)).not.toContain("clipboard-token");
     expect(f.releaseScreen).toHaveBeenCalledOnce();
+  });
+
+  it("saves a copied token directly on the approved destination bot", async () => {
+    const f = fixture({
+      capture: true,
+      captureTarget: true,
+      name: "capture_secret_from_clipboard",
+    });
+    const args = {
+      credential: {
+        name: "vanguard_api_key",
+        origin: "https://api.example.test",
+        auth: { type: "bearer" },
+      },
+      target_name: "Comercial",
+    };
+    f.setCalls([{ args, executionId: "capture-target-1" }]);
+
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.consumeClipboard).not.toHaveBeenCalled();
+
+    f.effects[0]!.status = "approved";
+    f.setCalls([{ args, executionId: "capture-target-2" }]);
+    await f.run();
+
+    expect(f.consumeClipboard).toHaveBeenCalledOnce();
+    expect(f.results.at(-1)).toEqual({
+      saved: true,
+      name: "vanguard_api_key",
+      origin: "https://api.example.test",
+      auth: { type: "bearer" },
+      source: "computer_clipboard",
+      target_bot_id: "bot-target",
+      target_name: "Comercial",
+    });
+    expect(JSON.stringify(f.results)).not.toContain("clipboard-token");
+    expect(JSON.stringify(f.effects)).not.toContain("clipboard-token");
   });
 });

@@ -69,7 +69,10 @@ function describeApprovalAction(toolName: string, args: Record<string, unknown>)
         ? (args.credential as Record<string, unknown>)
         : undefined;
     const name = credential?.name ? `“${String(credential.name)}”` : "a credential";
-    return `capturing ${name} from this bot's computer clipboard`;
+    const target = args.target_bot_id ?? args.target_name;
+    return target
+      ? `capturing ${name} from this bot's computer clipboard for bot ${String(target)}`
+      : `capturing ${name} from this bot's computer clipboard`;
   }
   const target = pickScopeLabel(args);
   return target ? `${toolName} → ${target}` : toolName;
@@ -96,6 +99,8 @@ function formatApprovalDetail(
         : undefined;
     if (credential?.name) lines.push(`credential: ${String(credential.name)}`);
     if (credential?.origin) lines.push(`origin: ${String(credential.origin)}`);
+    const target = args.target_bot_id ?? args.target_name;
+    if (target) lines.push(`destination bot: ${String(target)}`);
     lines.push("source: this bot's computer clipboard (the value will not be shown)");
   }
   for (const key of ["collection", "title", "to", "subject", "amount", "body"]) {
