@@ -55,7 +55,6 @@ export function AskCard({
   onAnswer: (text: string) => Promise<void>;
 }) {
   const { t } = useLingui();
-  const [editing, setEditing] = useState(false);
   const [answer, setAnswer] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +156,7 @@ export function AskCard({
             {submitting ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
           </Button>
         </form>
-      ) : editing ? (
+      ) : (
         <form
           className="mt-3.5 flex flex-col gap-2"
           onSubmit={(event) => {
@@ -167,35 +166,15 @@ export function AskCard({
         >
           <Input
             aria-label={t`Answer`}
+            disabled={submitting}
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}
             placeholder={t`Type your answer`}
           />
-          <div className="flex gap-2">
-            <Button type="submit" disabled={!answer.trim() || submitting}>
-              {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={submitting}
-              onClick={() => {
-                setAnswer("");
-                setEditing(false);
-              }}
-            >
-              <Trans>Cancel</Trans>
-            </Button>
-          </div>
+          <Button type="submit" className="self-start" disabled={!answer.trim() || submitting}>
+            {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
+          </Button>
         </form>
-      ) : (
-        <div className="mt-3.5 flex gap-2">
-          <Button disabled={submitting} onClick={() => void submitAnswer("approved")}>
-            {submitting ? <Trans>Sending…</Trans> : <Trans>Send it</Trans>}
-          </Button>
-          <Button variant="outline" disabled={submitting} onClick={() => setEditing(true)}>
-            <Trans>Edit first</Trans>
-          </Button>
-        </div>
       )}
       {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
     </div>

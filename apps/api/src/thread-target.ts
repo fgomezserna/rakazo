@@ -66,7 +66,10 @@ export type ThreadTarget =
 const THREAD_MESSAGE_PAGE_SIZE = 100;
 const RUNS_NEEDING_CONTINUE = new Set(["queued"]);
 
-const STEERABLE_RUN_STATUSES = new Set(["queued", "leased", "running"]);
+// A message is always valid composer input while a run is active. For paused runs the
+// steering message is durable context and is claimed when the run resumes; it must not make
+// the composer unusable while an ask or takeover is waiting for the user.
+const STEERABLE_RUN_STATUSES = new Set<string>(ACTIVE_RUN_STATUSES);
 
 type MentionTargetInput = string | { kind: "bot" | "group" | "routine" | "connector"; id: string };
 

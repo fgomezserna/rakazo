@@ -1013,66 +1013,102 @@ function groupTarget() {
 }
 
 describe("sendThreadMessage", () => {
-  it("rejects a new bot message while a run is waiting on input", async () => {
-    const tx = {
-      thread: {
-        update: vi.fn().mockResolvedValue({ nextMessageSeq: 2 }),
-      },
-      message: {
-        create: vi.fn().mockResolvedValue({
-          id: "msg-1",
-          threadId: "thread-1",
-          seq: 1,
-          role: "user",
-          blocks: [{ kind: "text", text: "hi" }],
-          botId: null,
-          replyToMessageId: null,
-          runId: null,
-          createdAt: new Date(),
-        }),
-        update: vi.fn(),
-      },
-      run: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ id: "run-waiting", taskId: "task-1", status: "waiting_input" }]),
-      },
-      steeringMessage: { create: vi.fn() },
-      event: { create: vi.fn() },
-      task: { create: vi.fn() },
-    };
-    const prisma = {
-      message: { findUnique: vi.fn().mockResolvedValue(null) },
-      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
-    const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
-    const target = {
-      kind: "bot",
-      botId: "bot-1",
-      threadId: "thread-1",
-      bot: { computer: null },
-    } as ThreadTarget;
+  it.each(["waiting_input", "waiting_takeover"] as const)(
+    "persists a steering message while a run is %s",
+    async (waitingStatus) => {
+      let messageSeq = 0;
+      let eventSeq = 0;
+      const tx = {
+        thread: {
+          update: vi
+            .fn()
+            .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+              data.nextMessageSeq
+                ? Promise.resolve({ nextMessageSeq: ++messageSeq })
+                : Promise.resolve({ nextEventSeq: ++eventSeq }),
+            ),
+        },
+        message: {
+          create: vi.fn().mockResolvedValue({
+            id: "msg-1",
+            threadId: "thread-1",
+            seq: 1,
+            role: "user",
+            blocks: [{ kind: "text", text: "hi" }],
+            botId: null,
+            replyToMessageId: null,
+            runId: null,
+            createdAt: new Date(),
+          }),
+          update: vi.fn().mockResolvedValue(undefined),
+        },
+        run: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue([{ id: "run-waiting", taskId: "task-1", status: waitingStatus }]),
+          findUnique: vi.fn().mockResolvedValue({ status: waitingStatus, startedAt: null }),
+        },
+        steeringMessage: { create: vi.fn().mockResolvedValue(undefined) },
+        event: {
+          create: vi
+            .fn()
+            .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+              Promise.resolve({ ...data, seq: eventSeq - 1 }),
+            ),
+        },
+        task: { create: vi.fn() },
+      };
+      const events = { notify: vi.fn().mockResolvedValue(undefined) };
+      const jobs = { enqueue: vi.fn().mockResolvedValue(undefined) };
+      const prisma = {
+        message: { findUnique: vi.fn().mockResolvedValue(null) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      } as unknown as PrismaClient;
+      const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
+      const target = {
+        kind: "bot",
+        botId: "bot-1",
+        threadId: "thread-1",
+        bot: { computer: null },
+      } as ThreadTarget;
 
-    await expect(
-      sendThreadMessage(
-        {
-          prisma,
-          events: { notify: vi.fn() } as never,
-          jobs: { enqueue: vi.fn() } as never,
+      await expect(
+        sendThreadMessage(
+          {
+            prisma,
+            events: events as never,
+            jobs: jobs as never,
+          },
+          actor,
+          target,
+          {
+            text: "hi",
+            clientNonce: "nonce-1",
+          },
+        ),
+      ).resolves.toEqual({
+        taskId: "task-1",
+        runId: "run-waiting",
+        seq: 1,
+        runIds: ["run-waiting"],
+      });
+      expect(tx.steeringMessage.create).toHaveBeenCalledWith({
+        data: {
+          messageId: "msg-1",
+          botId: "bot-1",
+          userId: "user-1",
+          runId: "run-waiting",
         },
-        actor,
-        target,
-        {
-          text: "hi",
-          clientNonce: "nonce-1",
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: "CONFLICT",
-      message: "Answer the pending ask first.",
-    });
-    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
-  });
+      });
+      expect(tx.message.update).toHaveBeenCalledWith({
+        where: { id: "msg-1" },
+        data: { runId: "run-waiting" },
+      });
+      expect(tx.task.create).not.toHaveBeenCalled();
+      expect(jobs.enqueue).not.toHaveBeenCalled();
+      expect(events.notify).toHaveBeenCalledWith("thread-1", 0);
+    },
+  );
 });
 
 describe("stopThreadRuns", () => {

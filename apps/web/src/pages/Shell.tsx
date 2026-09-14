@@ -126,7 +126,7 @@ import {
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
-import { AskCard } from "../components/AskCard";
+import { type AskBlock, AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
 import { CloudAgentCard } from "../components/CloudAgentCard";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
@@ -265,6 +265,11 @@ type PendingAttachment = {
   threadKey: string;
   file: File;
   previewUrl?: string;
+};
+
+type PendingAskSummary = {
+  messageId: string;
+  text: string;
 };
 
 type PendingBrowserNotification = {
@@ -1717,6 +1722,14 @@ export function ShellPage() {
     () => userVisibleMessages(activeSnapshot?.messages ?? [], { includePeerReceipts: true }),
     [activeSnapshot?.messages],
   );
+  const pendingAsk = useMemo<PendingAskSummary | null>(() => {
+    if (!answerableAskMessageId) return null;
+    const message = transcriptMessages.find((item) => item.id === answerableAskMessageId);
+    const block = message?.blocks.find(
+      (item): item is AskBlock => item.kind === "ask" && item.status !== "answered",
+    );
+    return block && message ? { messageId: message.id, text: block.text } : null;
+  }, [answerableAskMessageId, transcriptMessages]);
   const transcriptArtifactTarget = useMemo<ArtifactTarget>(
     () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
     [active?.id, groupId, inGroup],
@@ -3490,6 +3503,8 @@ export function ShellPage() {
             onRunErrorPresented={handleRunErrorPresented}
             onDismissError={dismissComposerError}
             sending={sending}
+            pendingAsk={pendingAsk}
+            onJumpToPendingAsk={jumpToReplyMessage}
             fileInputRef={fileInputRef}
             onAttachmentPick={onAttachmentPick}
             onRemoveAttachment={removeAttachment}
@@ -4922,6 +4937,8 @@ const Composer = memo(function Composer({
   onRunErrorPresented,
   onDismissError,
   sending,
+  pendingAsk,
+  onJumpToPendingAsk,
   fileInputRef,
   onAttachmentPick,
   onRemoveAttachment,
@@ -4947,6 +4964,8 @@ const Composer = memo(function Composer({
   onRunErrorPresented: (runId: string) => void;
   onDismissError: () => void;
   sending: boolean;
+  pendingAsk: PendingAskSummary | null;
+  onJumpToPendingAsk: (messageId: string) => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onAttachmentPick: (files: FileList | null) => void | Promise<void>;
   onRemoveAttachment: (attachment: PendingAttachment) => void;
@@ -5226,6 +5245,25 @@ const Composer = memo(function Composer({
         draggingFiles ? "rounded-[14px] ring-2 ring-inset ring-ring" : ""
       }`}
     >
+      {pendingAsk ? (
+        <button
+          type="button"
+          data-testid="pending-ask-summary"
+          aria-label={pendingAsk.text}
+          onClick={() => onJumpToPendingAsk(pendingAsk.messageId)}
+          className="mb-3 flex w-full items-center gap-2 rounded-[14px] border border-border bg-muted px-4 py-2 text-start hover:border-foreground/30"
+        >
+          <span className="max-h-10 min-w-0 flex-1 overflow-hidden text-[13px] leading-5 text-foreground/80">
+            {pendingAsk.text}
+          </span>
+          <ArrowDown
+            size={15}
+            strokeWidth={1.8}
+            aria-hidden="true"
+            className="shrink-0 text-muted-foreground"
+          />
+        </button>
+      ) : null}
       {sendError || runError ? (
         <div
           ref={runErrorRef}
